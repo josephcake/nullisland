@@ -1,0 +1,184 @@
+/* nullisland demo — layout and panel chrome. */
+
+:root {
+  color-scheme: dark;
+  --bg: #0b1020;
+  --panel: rgba(15, 20, 35, 0.94);
+  --ink: #e6e9f2;
+  --muted: #9aa4bf;
+  --line: #2a3350;
+  --accent: #4c7dff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#map {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+#map {
+  position: absolute;
+  inset: 0;
+}
+
+#panel {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 10;
+  width: min(340px, calc(100vw - 32px));
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(10px);
+}
+
+h1 {
+  margin: 0 0 2px;
+  font-size: 19px;
+  letter-spacing: -0.01em;
+}
+
+.sub {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+label {
+  font-size: 12px;
+  color: #b9c2da;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+input[type="password"] {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0e1426;
+  color: var(--ink);
+  font: inherit;
+}
+
+input[type="password"]:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+button {
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:hover {
+  filter: brightness(1.08);
+}
+
+button.ghost {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.check {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+.hint {
+  margin: 8px 0 0;
+  color: #7e89a6;
+  font-size: 11px;
+}
+
+.hint a,
+footer a {
+  color: #8fb0ff;
+  text-decoration: none;
+}
+
+.status {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #111a33;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.status[data-kind="busy"] {
+  color: #ffd479;
+}
+
+.status[data-kind="ok"] {
+  color: #6ee7a8;
+}
+
+.status[data-kind="error"] {
+  color: #ff8f8f;
+}
+
+.layers {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.layers label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: #d7dcec;
+  cursor: pointer;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 22%, transparent);
+}
+
+footer {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 14px;
+  font-size: 11px;
+}
+
+footer #forget {
+  margin-left: auto;
+}

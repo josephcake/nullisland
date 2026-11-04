@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>nullisland demo — NWS watches &amp; warnings</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="map"></div>
+
+    <section id="panel" aria-label="Demo controls">
+      <h1>nullisland</h1>
+      <p class="sub">NWS watches &amp; warnings, drawn by nullisland on Google Maps.</p>
+
+      <form id="key-form" autocomplete="off">
+        <label for="key">Google Maps API key</label>
+        <div class="row">
+          <input id="key" type="password" placeholder="AIza…" spellcheck="false" />
+          <button type="submit">Load map</button>
+        </div>
+        <label class="check">
+          <input id="remember" type="checkbox" checked />
+          Remember on this device
+        </label>
+        <p class="hint">
+          Google requires a key for the Maps JavaScript API. The ArcGIS layer itself needs no token.
+          <a href="https://developers.google.com/maps/documentation/javascript/get-api-key" target="_blank" rel="noreferrer">Get a key</a>.
+        </p>
+      </form>
+
+      <div id="status" class="status" hidden></div>
+
+      <ul id="layers" class="layers" hidden>
+        <li>
+          <label><input type="checkbox" data-layer="severe" disabled checked /><span class="dot" style="--c: #e8590c"></span>Severe</label>
+        </li>
+        <li>
+          <label><input type="checkbox" data-layer="moderate" disabled checked /><span class="dot" style="--c: #f2b705"></span>Moderate</label>
+        </li>
+        <li>
+          <label><input type="checkbox" data-layer="minor" disabled checked /><span class="dot" style="--c: #3b82f6"></span>Minor</label>
+        </li>
+      </ul>
+
+      <footer>
+        <a href="https://github.com/josephcake/nullisland" target="_blank" rel="noreferrer">Source</a>
+        <a href="https://services9.arcgis.com/RHVPKKiFTONKtxq3/arcgis/rest/services/NWS_Watches_Warnings_v1/FeatureServer" target="_blank" rel="noreferrer">NWS data</a>
+        <button id="forget" class="ghost" type="button" hidden>Forget key</button>
+      </footer>
+    </section>
+
+    <script type="module" src="demo.js"></script>
+  </body>
+</html>

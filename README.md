@@ -47,6 +47,16 @@ arc.on('error', console.error);
 await arc.ready;
 ```
 
+## Demo
+
+`demo/` renders the public NWS watches and warnings service on a Google Map. Google's JS API
+requires an API key, so the page asks for one at runtime — nothing is committed, and the ArcGIS
+layer itself needs no token.
+
+```bash
+npx serve demo
+```
+
 ## How it works
 
 Each layer picks its own strategy:
