@@ -18,11 +18,11 @@
   "author": "Joseph <joseph8p@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/josephcake/arcmeld.git"
+    "url": "git+https://github.com/josephcake/nullisland.git"
   },
-  "homepage": "https://github.com/josephcake/arcmeld#readme",
+  "homepage": "https://github.com/josephcake/nullisland#readme",
   "bugs": {
-    "url": "https://github.com/josephcake/arcmeld/issues"
+    "url": "https://github.com/josephcake/nullisland/issues"
   },
   "type": "module",
   "main": "./dist/index.cjs",
