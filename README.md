@@ -8,7 +8,7 @@ ArcGIS REST URL and it renders that layer on your Google Map, choosing the cheap
 layer and refusing to re-download what it already has.
 
 ```ts
-import {NullIsland} from 'nullisland';
+import {NullIsland} from '@offthemap/nullisland';
 
 const arc = new NullIsland({
   map: googleMap,
@@ -28,7 +28,7 @@ No Google Maps API key handling, no framework, no runtime dependencies. Just a m
 ## Install
 
 ```bash
-npm install nullisland
+npm install @offthemap/nullisland
 ```
 
 The Google Maps JavaScript API must be loaded first (or injected with the `google` option, which is
@@ -39,7 +39,7 @@ useful for tests and for loaders that expose the namespace under another name).
 ```html
 <script src="https://maps.googleapis.com/maps/api/js?key=API_KEY&v=weekly"></script>
 <script type="module">
-  import {NullIsland} from 'nullisland';
+  import {NullIsland} from '@offthemap/nullisland';
 
   const map = new google.maps.Map(document.getElementById('map'), {
     center: {lat: 34.05, lng: -117.2},
