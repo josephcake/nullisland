@@ -65,7 +65,11 @@ export interface NullIslandOptions {
   map: google.maps.Map;
   /** ArcGIS layers to manage. Invalid entries are reported and skipped. */
   layers: ArcGisLayerConfig[];
-  /** ArcGIS token or API key, appended as `token` to every request. */
+  /**
+   * Optional ArcGIS token or API key. Public layers need no token; only
+   * services that enforce authentication require one. When provided it is
+   * appended as `token` to every ArcGIS request.
+   */
   apiKey?: TokenSource;
   /**
    * The Google Maps API namespace. Defaults to `globalThis.google`.

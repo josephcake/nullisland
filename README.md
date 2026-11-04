@@ -36,6 +36,9 @@ useful for tests and for loaders that expose the namespace under another name).
 
 ## Quick start
 
+Public ArcGIS services need **no token and no ArcGIS account** — the example below uses a public
+FeatureServer. `apiKey` is opt-in, only for services that enforce authentication.
+
 ```html
 <script src="https://maps.googleapis.com/maps/api/js?key=API_KEY&v=weekly"></script>
 <script type="module">
@@ -144,6 +147,20 @@ fills are not translated — they degrade to the base symbol.
 - **Prefetch.** `arc.prefetch(id)` warms the cache for the current viewport, e.g. on hover in a layer
   tray.
 
+## Authentication
+
+Most public layers need nothing. If a service returns HTTP 498/499, nullisland raises a
+`NullIslandAuthError` explaining that a token is required; pass one as a string or as a function for
+short-lived OAuth tokens:
+
+```ts
+const arc = new NullIsland({
+  map,
+  apiKey: async () => (await fetch('/arcgis-token')).json().then((r) => r.token),
+  layers: [{url: 'https://internal.example.com/arcgis/rest/services/Parcels/FeatureServer'}],
+});
+```
+
 ## Design decisions
 
 A few choices are deliberate:
@@ -187,7 +204,7 @@ are rejected, and only a service's metadata, `/query` and `/export` endpoints ar
 | --- | --- | --- | --- |
 | `map` | `google.maps.Map` | — | Required. |
 | `layers` | `ArcGisLayerConfig[]` | — | Required. |
-| `apiKey` | `string \| () => string \| Promise<string>` | — | ArcGIS token or API key, appended as `token`. Functions are re-called on HTTP 498/499. |
+| `apiKey` | `string \| () => string \| Promise<string>` | — | **Optional.** Only for services that require authentication; public layers work without it. Appended as `token`; functions are re-called on HTTP 498/499. |
 | `google` | `typeof google` | `globalThis.google` | Inject the Maps namespace. |
 | `padding` | `number` | `0.25` | Extra viewport coverage. |
 | `maxImageSize` | `number` | `4096` | Export size cap. |

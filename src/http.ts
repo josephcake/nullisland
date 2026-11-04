@@ -148,6 +148,10 @@ export class HttpClient {
       // Ignore body parsing failures; the status code is the useful signal.
     }
 
+    if ((response.status === 498 || response.status === 499) && !this.token) {
+      message = 'This ArcGIS service requires a token. Pass the `apiKey` option; public layers do not need one.';
+    }
+
     const ErrorType = response.status === 401 || response.status === 498 || response.status === 499
       ? NullIslandAuthError
       : NullIslandHttpError;
