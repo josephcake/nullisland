@@ -1,11 +1,23 @@
+```text
+                       .
+                      / \
+                     /   \
+                    /_____\
+           ~~~~~~~~~~~~~~~~~~~~~~~~
+         ~~~~~~~   (0°, 0°)   ~~~~~~~
+           ~~~~~~~~~~~~~~~~~~~~~~~~
+                  ~           ~
+```
+
 # nullisland
 
-> ArcGIS layers on Google Maps — binary PBF features, server-rendered exports, viewport-aware caching.
+**ArcGIS layers on Google Maps.** Binary PBF features, CORS-free image exports, tile-snapped
+caching — and no token required for public layers.
 
-Google Maps has no vector-tile layer. ArcGIS has MapServer and FeatureServer endpoints, published
-cartography, and a compact binary format for features. **nullisland** connects the two: point it at an
-ArcGIS REST URL and it renders that layer on your Google Map, choosing the cheapest strategy per
-layer and refusing to re-download what it already has.
+Google Maps has no vector-tile layer. ArcGIS services answer in three shapes: a rendered image, a
+GeoJSON document, or a compact binary called PBF. **nullisland** takes an ArcGIS REST URL and puts
+that layer on your Google Map — picking the cheaper strategy per layer, preferring PBF, and never
+re-downloading ground it already has.
 
 ```ts
 import {NullIsland} from '@offthemap/nullisland';

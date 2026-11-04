@@ -1,7 +1,7 @@
 {
   "name": "@offthemap/nullisland",
   "version": "0.2.0",
-  "description": "Render ArcGIS MapServer and FeatureServer layers on Google Maps. Binary PBF features, server-rendered exports, viewport-aware caching.",
+  "description": "ArcGIS layers on Google Maps \u2014 PBF vector features, CORS-free image exports, tile-snapped caching. No token needed for public layers.",
   "keywords": [
     "arcgis",
     "esri",
