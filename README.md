@@ -11,31 +11,9 @@
 
 # nullisland
 
-**ArcGIS layers on Google Maps.** Binary PBF features, CORS-free image exports, tile-snapped
-caching — and no token required for public layers.
-
-Google Maps has no vector-tile layer. ArcGIS services answer in three shapes: a rendered image, a
-GeoJSON document, or a compact binary called PBF. **nullisland** takes an ArcGIS REST URL and puts
-that layer on your Google Map — picking the cheaper strategy per layer, preferring PBF, and never
-re-downloading ground it already has.
-
-```ts
-import {NullIsland} from '@offthemap/nullisland';
-
-const arc = new NullIsland({
-  map: googleMap,
-  layers: [
-    {url: 'https://example.com/arcgis/rest/services/Parcels/FeatureServer', color: '#e4572e'},
-    {url: 'https://example.com/arcgis/rest/services/Basemap/MapServer'},
-  ],
-});
-
-await arc.ready;
-```
-
-No Google Maps API key handling, no framework, no runtime dependencies. Just a map and a service URL.
-
----
+ArcGIS layers on Google Maps. Point it at a `MapServer` or `FeatureServer` URL and it draws that
+layer on your map — PBF features when the service serves them, a server-rendered image when it
+doesn't. Public layers need no token.
 
 ## Install
 
@@ -43,170 +21,43 @@ No Google Maps API key handling, no framework, no runtime dependencies. Just a m
 npm install @offthemap/nullisland
 ```
 
-The Google Maps JavaScript API must be loaded first (or injected with the `google` option, which is
-useful for tests and for loaders that expose the namespace under another name).
+The Google Maps JavaScript API must be loaded before you create the engine.
 
-## Quick start
+## Usage
 
-Public ArcGIS services need **no token and no ArcGIS account** — the example below uses a public
-FeatureServer. `apiKey` is opt-in, only for services that enforce authentication.
+```ts
+import {NullIsland} from '@offthemap/nullisland';
 
-```html
-<script src="https://maps.googleapis.com/maps/api/js?key=API_KEY&v=weekly"></script>
-<script type="module">
-  import {NullIsland} from '@offthemap/nullisland';
+const arc = new NullIsland({
+  map,
+  layers: [
+    {
+      url: 'https://sampleserver6.arcgisonline.com/arcgis/rest/services/ServiceRequest/FeatureServer',
+      color: '#e4572e',
+    },
+    {
+      url: 'https://sampleserver6.arcgisonline.com/arcgis/rest/services/USA/MapServer',
+      opacity: 0.6,
+    },
+  ],
+  indicator: true,
+});
 
-  const map = new google.maps.Map(document.getElementById('map'), {
-    center: {lat: 34.05, lng: -117.2},
-    zoom: 12,
-    mapId: 'YOUR_MAP_ID',
-  });
-
-  const arc = new NullIsland({
-    map,
-    layers: [
-      {
-        url: 'https://sampleserver6.arcgisonline.com/arcgis/rest/services/ServiceRequest/FeatureServer',
-        title: 'Service requests',
-        color: '#e4572e',
-        minZoom: 10,
-      },
-    ],
-    indicator: true,
-  });
-
-  arc.on('error', (error) => console.error('[nullisland]', error));
-  await arc.ready;
-</script>
+arc.on('error', console.error);
+await arc.ready;
 ```
 
 ## How it works
 
-### Discovery
+Each layer picks its own strategy:
 
-Every layer is inspected independently. nullisland reads the service metadata, flattens group layers,
-and records what each sublayer can do: query, export, renderer, scale limits, `maxRecordCount`, and
-which query formats it supports. Discovery happens even for hidden layers, so enabling one is
-instant. Invalid configuration entries are reported on the `error` event and skipped — one bad URL
-cannot break the rest of the map.
+| Service | Strategy |
+| --- | --- |
+| MapServer with the `Map` capability | **Export** — server-rendered PNG placed over the map |
+| FeatureServer (or MapServer without export) | **Vector** — features drawn in a `google.maps.Data` layer |
 
-### Strategy selection
-
-| Service capability | Strategy | What is drawn |
-| --- | --- | --- |
-| MapServer with `Map` capability | `export` | A server-rendered PNG positioned over the map |
-| FeatureServer (or MapServer without export) | `vector` | Features decoded client-side into a `google.maps.Data` layer |
-
-Force a strategy per layer with `mode: 'export' | 'vector'`. `auto` is the default.
-
-### Export mode
-
-1. The current viewport is expanded by 25% (`padding`).
-2. The map is requested from `/export` in **EPSG:3857** at the device pixel ratio, capped at 4096px.
-3. The image is loaded with `img.src` (no CORS requirement) and placed with a custom `OverlayView`
-   using the div pixel coordinates of its geographic corners — not a `GroundOverlay`, which would
-   apply a second geographic transformation to an image that is already in Web Mercator.
-4. A new image cross-fades in over 150ms while the old one stays visible. Reduced-motion users get
-   an instant swap.
-5. Another image is requested when the zoom changes or roughly 85% of the padding has been panned
-   away, so the edge of the image never comes into view. A generation counter discards responses for
-   viewports the user already left.
-
-Export mode is cheap for dense layers: the server does the drawing, and nullisland downloads a single
-image instead of thousands of features. The trade-off is that the result is raster — it cannot be
-styled client-side, picked, or queried without an extra request.
-
-### Vector mode
-
-Requests are snapped outward to the OSM/XYZ tile grid (one zoom level coarser than the map), which
-makes cache keys deterministic and makes small pans free. Up to eight snapped viewports are cached
-per layer (`cacheSize`).
-
-Features are requested with:
-
-- `f=pbf` when the service supports it, then `f=geojson`, then `f=json` (Esri JSON) for older servers.
-- `resultType=tile` and `quantizationParameters` (PBF only) so the server returns integer coordinates
-  plus a transform — typically 5-10× smaller than raw doubles.
-- `outSR=4326`, an envelope in WGS84, and `orderByFields=<oid> ASC` when pagination is supported.
-- Page size from the service's `maxRecordCount`, capped at 2000.
-- `resultOffset` only after the first page, and only when
-  `advancedQueryCapabilities.supportsPagination` is advertised.
-- A hard cap of 10 pages / 20 000 features per viewport (`maxPages`, `maxFeatures`).
-
-Each page is added to the `Data` layer as it arrives, before the previous viewport's features are
-removed, so the layer never blanks out during navigation. If the viewport moves while a request is
-in flight, the request is aborted and the response discarded.
-
-### Styling
-
-Colors are resolved in this order:
-
-1. `color` on the layer config.
-2. The service's published renderer (`simple`, `uniqueValue`, `classBreaks`).
-3. A default blue.
-
-ArcGIS symbols are translated to Google Maps `Data` styles, including marker icons rendered as inline
-SVG so point size and outline survive. Visual variables, dash patterns, halos, labels and picture
-fills are not translated — they degrade to the base symbol.
-
-### Shared behaviour
-
-- **Visibility is free.** Hiding a layer detaches it from the map but keeps decoded features and
-  images in memory. Showing it again reattaches immediately.
-- **Zoom gating.** Outside a layer's zoom range it is detached, not destroyed.
-- **Antimeridian.** Viewports crossing ±180° are split into two longitude ranges before querying.
-- **Loading indicator.** Optional, appears only after 300ms so quick loads do not flicker.
-- **Prefetch.** `arc.prefetch(id)` warms the cache for the current viewport, e.g. on hover in a layer
-  tray.
-
-## Authentication
-
-Most public layers need nothing. If a service returns HTTP 498/499, nullisland raises a
-`NullIslandAuthError` explaining that a token is required; pass one as a string or as a function for
-short-lived OAuth tokens:
-
-```ts
-const arc = new NullIsland({
-  map,
-  apiKey: async () => (await fetch('/arcgis-token')).json().then((r) => r.token),
-  layers: [{url: 'https://internal.example.com/arcgis/rest/services/Parcels/FeatureServer'}],
-});
-```
-
-## Design decisions
-
-A few choices are deliberate:
-
-**Exports use `img.src`, not `fetch`.** ArcGIS `/export` endpoints are frequently served without CORS
-headers. An `<img>` does not need them, so the default `exportTransport: 'image'` works on far more
-agency servers. The trade-off is that a failed image reveals no status code; `exportTransport:
-'fetch'` downloads a blob instead, adding abort, timeout and status handling at the cost of CORS.
-
-**Refetch before the edge shows.** The exported image covers the viewport plus `padding`; a new image
-is requested once ~85% of that margin has been panned away, not when the image stops covering the
-view entirely.
-
-**Cache keys are tile-snapped.** Vector queries snap outward to the XYZ grid one zoom level coarser
-than the map. Keys are exact and repeatable, so a pan of a few hundred pixels reuses the previous
-response instead of fetching an overlapping envelope.
-
-**Queries stay in WGS84.** `inSR`/`outSR` are 4326 because `google.maps.Data` wants lat/lng. This
-avoids a client-side reprojection pass and keeps quantization tolerance meaningful in degrees.
-
-**PBF is probed, not assumed.** `supportedQueryFormats` is read first; FeatureServer ≥ 10.7 is
-probed on first use because some servers serve PBF without advertising it. Fallback order is PBF →
-GeoJSON → Esri JSON.
-
-**Pagination is capability-gated.** `resultOffset` and `orderByFields` are only sent when the layer
-advertises `advancedQueryCapabilities.supportsPagination`; older servers reject parameters they do
-not know.
-
-**One engine layer per service.** `sublayers` filters what is queried, but the result renders as one
-Google layer. For independent toggles today, configure one layer per sublayer URL.
-
-**URLs must be HTTPS.** Plain `http:` is rejected except for localhost, credentials embedded in URLs
-are rejected, and only a service's metadata, `/query` and `/export` endpoints are requested. Set
-`allowInsecure: true` for an internal HTTP server.
+Vector layers query only the visible viewport, prefer `f=pbf`, fall back to GeoJSON then Esri JSON,
+cache tile-aligned results, and abort requests the user has already panned past.
 
 ## API
 
@@ -216,7 +67,7 @@ are rejected, and only a service's metadata, `/query` and `/export` endpoints ar
 | --- | --- | --- | --- |
 | `map` | `google.maps.Map` | — | Required. |
 | `layers` | `ArcGisLayerConfig[]` | — | Required. |
-| `apiKey` | `string \| () => string \| Promise<string>` | — | **Optional.** Only for services that require authentication; public layers work without it. Appended as `token`; functions are re-called on HTTP 498/499. |
+| `apiKey` | `string \| () => string \| Promise<string>` | — | Optional. Only for services that require auth. |
 | `google` | `typeof google` | `globalThis.google` | Inject the Maps namespace. |
 | `padding` | `number` | `0.25` | Extra viewport coverage. |
 | `maxImageSize` | `number` | `4096` | Export size cap. |
@@ -226,8 +77,8 @@ are rejected, and only a service's metadata, `/query` and `/export` endpoints ar
 | `indicator` | `boolean \| HTMLElement` | `false` | Built-in loading pill, or your own element. |
 | `fetch` | `typeof fetch` | global | Custom fetch for proxying or instrumentation. |
 | `exportTransport` | `'image' \| 'fetch'` | `'image'` | Image element (no CORS) or blob via fetch (needs CORS). |
-| `exportTimeout` | `number` | `20000` | Per-image timeout in ms. |
-| `allowInsecure` | `boolean` | `false` | Permit plain `http:` URLs (localhost is always allowed). |
+| `exportTimeout` | `number` | `20000` | Per-image timeout, ms. |
+| `allowInsecure` | `boolean` | `false` | Permit plain `http:` URLs; localhost is always allowed. |
 
 ### Layer config
 
@@ -237,7 +88,7 @@ are rejected, and only a service's metadata, `/query` and `/export` endpoints ar
 | `id` | `string` | derived | Stable id, used by `arc.getLayer(id)`. |
 | `title` | `string` | service name | Display name. |
 | `color` | `string \| [r,g,b,a]` | renderer | Overrides the service symbology. |
-| `opacity` | `number` | `1` | 0-1. |
+| `opacity` | `number` | `1` | 0–1. |
 | `minZoom` / `maxZoom` | `number` | service scales | Google Maps zoom gate. |
 | `visible` | `boolean` | `true` | Initial state. |
 | `mode` | `'auto' \| 'export' \| 'vector'` | `'auto'` | Force a strategy. |
@@ -248,70 +99,43 @@ are rejected, and only a service's metadata, `/query` and `/export` endpoints ar
 ### Instance
 
 ```ts
-arc.ready;                       // Promise<void>, resolves after discovery
-arc.layers;                      // readonly NullIslandLayer[]
-arc.getLayer('parcels');         // NullIslandLayer | undefined
-arc.prefetch('parcels');         // warm the current viewport
-arc.refresh('parcels');          // drop cache and reload
-arc.setApiKey('new-token');
-arc.on('error' | 'status' | 'load', listener);  // returns an unsubscribe fn
+arc.ready;                                   // Promise<void>
+arc.layers;                                  // readonly NullIslandLayer[]
+arc.getLayer('parcels');                     // NullIslandLayer | undefined
+arc.prefetch('parcels');                     // warm the current viewport
+arc.refresh('parcels');                      // drop cache and reload
+arc.setApiKey('token');
+arc.on('status' | 'error' | 'load', fn);     // returns an unsubscribe function
 arc.destroy();
 ```
 
-`NullIslandLayer` exposes `id`, `title`, `url`, `mode`, `state`, `sublayers`, `visible`, and
-`setVisible()`, `setOpacity()`, `prefetch()`, `refresh()`.
+A layer handle has `setVisible()`, `setOpacity()`, `prefetch()` and `refresh()`.
 
-## About PBF
+### Authentication
 
-Two different formats share the name "PBF" in the ArcGIS world, and nullisland only deals with the
-second:
-
-| Format | Endpoint | Decoder |
-| --- | --- | --- |
-| Mapbox Vector Tiles | `VectorTileServer/tile/{z}/{y}/{x}.pbf` | Many (deck.gl, MapLibre, `@mapbox/vector-tile`) |
-| Esri FeatureCollection PBuffer | `FeatureServer/{id}/query?f=pbf` | This package, from the [Esri spec](https://github.com/Esri/arcgis-pbf) |
-
-The FeatureCollection decoder is a hand-written protobuf reader with no runtime dependency. It
-handles quantized integer coordinates, per-ring delta encoding, the upper-left transform, attribute
-types, and polygon ring grouping (outer rings clockwise, holes nested by containment). You can use it
-standalone:
+Public layers work as-is. For a service that enforces auth:
 
 ```ts
-import {decodeFeatureCollection} from 'nullisland/pbf';
-
-const response = await fetch(url);
-const {features, exceededTransferLimit} = decodeFeatureCollection(await response.arrayBuffer());
+const arc = new NullIsland({
+  map,
+  apiKey: async () => (await fetch('/arcgis-token')).json().then((r) => r.token),
+  layers: [{url: 'https://internal.example.com/arcgis/rest/services/Parcels/FeatureServer'}],
+});
 ```
 
-Services that do not implement `f=pbf` (notably MapServer, and servers older than 10.7) fall back to
-GeoJSON automatically, and the negative result is cached per sublayer.
+## Notes
 
-## Limitations
+- **No token by default.** `apiKey` is only for services that require it.
+- **HTTPS only**, except localhost; set `allowInsecure: true` for an internal HTTP server.
+- **Vector ceiling.** `google.maps.Data` is comfortable with a few thousand features, not tens of
+  thousands.
+- **Export is raster.** No client-side styling, picking or querying.
+- **MapServer has no PBF.** Those layers use GeoJSON, or Esri JSON on older servers.
+- **No MVT.** For a `VectorTileServer`, use deck.gl's `MVTLayer` over `GoogleMapsOverlay`.
 
-- **Vector rendering ceiling.** `google.maps.Data` tessellates on the CPU. A few thousand features is
-  comfortable; tens of thousands is not. Keep `maxZoom` high enough that dense layers are queried at
-  street level only.
-- **Export images are raster.** Client-side styling and hit-testing do not apply. Use vector mode for
-  interactive layers.
-- **MapServer PBF is not a thing.** Query PBF is a FeatureServer capability; MapServer layers use
-  GeoJSON, or Esri JSON on servers old enough to lack both.
-- **No MVT support on purpose.** If you have a `VectorTileServer`, deck.gl's `MVTLayer` over
-  `GoogleMapsOverlay` is a better fit — nullisland targets arbitrary services that have no tiles
-  published.
-- **World wrap.** Export mode clamps to one world when the viewport spans more than 360°.
+## Design notes
 
-## Development
-
-```bash
-npm install
-npm run typecheck
-npm test
-npm run build
-```
-
-Tests cover the Web Mercator math, tile snapping, configuration validation, renderer translation,
-LRU caching, and PBF decoding against a recorded real response plus synthetic payloads built from the
-Esri schema.
+Thresholds, caching and the tradeoffs behind them: [docs/design.md](docs/design.md).
 
 ## License
 
