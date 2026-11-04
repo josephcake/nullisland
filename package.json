@@ -1,7 +1,7 @@
 {
   "name": "@offthemap/nullisland",
-  "version": "0.2.0",
-  "description": "ArcGIS layers on Google Maps \u2014 PBF vector features, CORS-free image exports, tile-snapped caching. No token needed for public layers.",
+  "version": "0.2.1",
+  "description": "ArcGIS layers on Google Maps — PBF vector features, CORS-free image exports, tile-snapped caching. No token needed for public layers.",
   "keywords": [
     "arcgis",
     "esri",
