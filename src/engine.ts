@@ -54,7 +54,9 @@ export class NullIsland {
 
     this.http = new HttpClient({fetch: options.fetch, token: options.apiKey});
 
-    const {layers, errors} = normalizeLayers(options.layers);
+    const {layers, errors} = normalizeLayers(options.layers, {
+      allowInsecure: options.allowInsecure === true,
+    });
     const reducedMotion = options.reducedMotion ?? prefersReducedMotion();
 
     this.controllers = layers.map(
@@ -68,6 +70,8 @@ export class NullIsland {
           maxImageSize: options.maxImageSize ?? 4096,
           fadeDuration: options.fadeDuration ?? 150,
           reducedMotion,
+          exportTransport: options.exportTransport ?? 'image',
+          exportTimeout: options.exportTimeout ?? 20_000,
           onLoading: (id, loading) => this.handleLoading(id, loading),
           onError: (error) => this.emitError(error),
           onLoaded: (id) => this.emitter.emit('load', {layer: id}),

@@ -89,6 +89,17 @@ export interface NullIslandOptions {
   indicator?: boolean | HTMLElement;
   /** Custom fetch implementation (proxying, instrumentation). */
   fetch?: typeof fetch;
+  /**
+   * How exported images are loaded. `image` (default) sets `img.src`
+   * directly, so it works on servers that do not send CORS headers. `fetch`
+   * downloads a blob, which adds abort, timeout and HTTP status handling at
+   * the cost of requiring CORS on `/export`.
+   */
+  exportTransport?: 'image' | 'fetch';
+  /** Allow plain HTTP service URLs. Localhost is always allowed. Defaults to false. */
+  allowInsecure?: boolean;
+  /** Timeout for a single export image load, in ms. Defaults to 20000. */
+  exportTimeout?: number;
 }
 
 /** Per-layer status snapshot. */

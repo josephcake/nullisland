@@ -50,6 +50,8 @@ export interface ArcGisSublayer {
   fields: ArcGisField[];
   supportsQuery: boolean;
   supportsPbf: boolean | 'unknown';
+  supportsGeoJson: boolean | 'unknown';
+  supportsPagination: boolean;
   zoom: ZoomRange;
 }
 
@@ -60,6 +62,7 @@ export interface ArcGisService {
   title: string;
   description: string | undefined;
   capabilities: string[];
+  queryFormats: string[];
   supportsExport: boolean;
   maxRecordCount: number;
   singleLayer: boolean;
@@ -81,6 +84,11 @@ interface LayerMetadata {
   fields?: ArcGisField[];
   subLayerIds?: number[] | null;
   maxRecordCount?: number;
+  advancedQueryCapabilities?: {
+    supportsPagination?: boolean;
+    supportsStatistics?: boolean;
+    supportsReturningQueryExtent?: boolean;
+  };
 }
 
 interface ServiceMetadata extends LayerMetadata {
@@ -106,6 +114,7 @@ export async function discoverService(
   const metadata = await http.json<ServiceMetadata>(service.base, {f: 'json'});
   const version = Number(metadata.currentVersion ?? 0);
   const capabilities = splitCapabilities(metadata.capabilities ?? '');
+  const queryFormats = splitFormats(metadata.supportedQueryFormats);
 
   if (service.layerId !== null) {
     const layer = {...metadata, id: service.layerId} as LayerMetadata;
@@ -113,6 +122,7 @@ export async function discoverService(
       kind: service.kind,
       version,
       maxRecordCount: Number(metadata.maxRecordCount ?? 1000),
+      queryFormats,
     });
     const layerCapabilities = splitCapabilities(layer.capabilities ?? metadata.capabilities ?? '');
     return {
@@ -122,6 +132,7 @@ export async function discoverService(
       title: options.title ?? layer.name ?? service.base,
       description: metadata.description ?? metadata.serviceDescription,
       capabilities: layerCapabilities,
+      queryFormats,
       supportsExport: service.kind === 'MapServer' && hasCapability(layerCapabilities, 'map'),
       maxRecordCount: sublayer.maxRecordCount,
       singleLayer: true,
@@ -158,6 +169,7 @@ export async function discoverService(
       kind: service.kind,
       version,
       maxRecordCount: Number(layer.maxRecordCount ?? metadata.maxRecordCount ?? 1000),
+      queryFormats,
     }),
   );
 
@@ -176,6 +188,7 @@ export async function discoverService(
       service.base,
     description: metadata.serviceDescription ?? metadata.description,
     capabilities,
+    queryFormats,
     supportsExport: service.kind === 'MapServer' && hasCapability(capabilities, 'map'),
     maxRecordCount: Number(metadata.maxRecordCount ?? first?.maxRecordCount ?? 1000),
     singleLayer: false,
@@ -186,11 +199,25 @@ export async function discoverService(
 
 function toSublayer(
   layer: LayerMetadata,
-  context: {kind: ServiceKind; version: number; maxRecordCount: number},
+  context: {kind: ServiceKind; version: number; maxRecordCount: number; queryFormats: string[]},
 ): ArcGisSublayer {
   const minScale = Number(layer.minScale ?? 0);
   const maxScale = Number(layer.maxScale ?? 0);
-  const supportsPbf = context.kind === 'FeatureServer' && context.version >= PBF_MIN_VERSION;
+  const formats = context.queryFormats;
+
+  // Prefer what the service advertises. Some servers omit PBF from
+  // supportedQueryFormats even though they serve it, so FeatureServer >= 10.7
+  // stays 'unknown' and is probed on first use.
+  const supportsPbf: boolean | 'unknown' = formats.includes('pbf')
+    ? true
+    : context.kind === 'FeatureServer' && context.version >= PBF_MIN_VERSION
+      ? 'unknown'
+      : false;
+  const supportsGeoJson: boolean | 'unknown' =
+    formats.length === 0 ? 'unknown' : formats.includes('geojson');
+  const supportsPagination =
+    layer.supportsAdvancedQueries !== false &&
+    layer.advancedQueryCapabilities?.supportsPagination !== false;
 
   return {
     id: layer.id ?? 0,
@@ -203,7 +230,9 @@ function toSublayer(
     renderer: layer.renderer ?? null,
     fields: layer.fields ?? [],
     supportsQuery: layer.supportsAdvancedQueries !== false,
-    supportsPbf: supportsPbf ? 'unknown' : false,
+    supportsPbf,
+    supportsGeoJson,
+    supportsPagination,
     zoom: zoomRangeFromScales(minScale, maxScale),
   };
 }
@@ -221,6 +250,14 @@ function unionZoom(sublayers: ArcGisSublayer[]): ZoomRange {
     maxZoom = Math.max(maxZoom, sublayer.zoom.maxZoom);
   }
   return {minZoom: Number.isFinite(minZoom) ? minZoom : 0, maxZoom: Number.isFinite(maxZoom) ? maxZoom : 22};
+}
+
+function splitFormats(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean);
 }
 
 function splitCapabilities(value: string): string[] {

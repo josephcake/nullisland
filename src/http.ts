@@ -80,6 +80,12 @@ export class HttpClient {
     throw lastError ?? new NullIslandAuthError('Token rejected by the ArcGIS server', 499, url);
   }
 
+  /** Build a request URL (including token) without performing the request. */
+  async url(path: string, params: QueryParams = {}): Promise<string> {
+    const token = await this.resolveToken();
+    return withParams(path, params, token);
+  }
+
   /** GET and parse JSON, surfacing ArcGIS `{error: ...}` documents as exceptions. */
   async json<T>(url: string, params: QueryParams = {}): Promise<T> {
     const response = await this.request(url, params);

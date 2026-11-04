@@ -88,13 +88,14 @@ Force a strategy per layer with `mode: 'export' | 'vector'`. `auto` is the defau
 
 1. The current viewport is expanded by 25% (`padding`).
 2. The map is requested from `/export` in **EPSG:3857** at the device pixel ratio, capped at 4096px.
-3. The image is placed with a custom `OverlayView` using the div pixel coordinates of its geographic
-   corners — not a `GroundOverlay`, which would apply a second geographic transformation to an image
-   that is already in Web Mercator.
+3. The image is loaded with `img.src` (no CORS requirement) and placed with a custom `OverlayView`
+   using the div pixel coordinates of its geographic corners — not a `GroundOverlay`, which would
+   apply a second geographic transformation to an image that is already in Web Mercator.
 4. A new image cross-fades in over 150ms while the old one stays visible. Reduced-motion users get
    an instant swap.
-5. Another image is requested only when the zoom changes or the current image no longer covers the
-   viewport. A generation counter discards responses for viewports the user already left.
+5. Another image is requested when the zoom changes or roughly 85% of the padding has been panned
+   away, so the edge of the image never comes into view. A generation counter discards responses for
+   viewports the user already left.
 
 Export mode is cheap for dense layers: the server does the drawing, and nullisland downloads a single
 image instead of thousands of features. The trade-off is that the result is raster — it cannot be
@@ -108,11 +109,13 @@ per layer (`cacheSize`).
 
 Features are requested with:
 
-- `f=pbf` when the service supports it, `f=geojson` otherwise.
+- `f=pbf` when the service supports it, then `f=geojson`, then `f=json` (Esri JSON) for older servers.
 - `resultType=tile` and `quantizationParameters` (PBF only) so the server returns integer coordinates
   plus a transform — typically 5-10× smaller than raw doubles.
-- `outSR=4326`, an envelope in WGS84, and `orderByFields=<oid> ASC` for stable pagination.
+- `outSR=4326`, an envelope in WGS84, and `orderByFields=<oid> ASC` when pagination is supported.
 - Page size from the service's `maxRecordCount`, capped at 2000.
+- `resultOffset` only after the first page, and only when
+  `advancedQueryCapabilities.supportsPagination` is advertised.
 - A hard cap of 10 pages / 20 000 features per viewport (`maxPages`, `maxFeatures`).
 
 Each page is added to the `Data` layer as it arrives, before the previous viewport's features are
@@ -141,6 +144,41 @@ fills are not translated — they degrade to the base symbol.
 - **Prefetch.** `arc.prefetch(id)` warms the cache for the current viewport, e.g. on hover in a layer
   tray.
 
+## Design decisions
+
+A few choices are deliberate:
+
+**Exports use `img.src`, not `fetch`.** ArcGIS `/export` endpoints are frequently served without CORS
+headers. An `<img>` does not need them, so the default `exportTransport: 'image'` works on far more
+agency servers. The trade-off is that a failed image reveals no status code; `exportTransport:
+'fetch'` downloads a blob instead, adding abort, timeout and status handling at the cost of CORS.
+
+**Refetch before the edge shows.** The exported image covers the viewport plus `padding`; a new image
+is requested once ~85% of that margin has been panned away, not when the image stops covering the
+view entirely.
+
+**Cache keys are tile-snapped.** Vector queries snap outward to the XYZ grid one zoom level coarser
+than the map. Keys are exact and repeatable, so a pan of a few hundred pixels reuses the previous
+response instead of fetching an overlapping envelope.
+
+**Queries stay in WGS84.** `inSR`/`outSR` are 4326 because `google.maps.Data` wants lat/lng. This
+avoids a client-side reprojection pass and keeps quantization tolerance meaningful in degrees.
+
+**PBF is probed, not assumed.** `supportedQueryFormats` is read first; FeatureServer ≥ 10.7 is
+probed on first use because some servers serve PBF without advertising it. Fallback order is PBF →
+GeoJSON → Esri JSON.
+
+**Pagination is capability-gated.** `resultOffset` and `orderByFields` are only sent when the layer
+advertises `advancedQueryCapabilities.supportsPagination`; older servers reject parameters they do
+not know.
+
+**One engine layer per service.** `sublayers` filters what is queried, but the result renders as one
+Google layer. For independent toggles today, configure one layer per sublayer URL.
+
+**URLs must be HTTPS.** Plain `http:` is rejected except for localhost, credentials embedded in URLs
+are rejected, and only a service's metadata, `/query` and `/export` endpoints are requested. Set
+`allowInsecure: true` for an internal HTTP server.
+
 ## API
 
 ### `new NullIsland(options)`
@@ -158,6 +196,9 @@ fills are not translated — they degrade to the base symbol.
 | `reducedMotion` | `boolean` | OS setting | Disable cross-fade. |
 | `indicator` | `boolean \| HTMLElement` | `false` | Built-in loading pill, or your own element. |
 | `fetch` | `typeof fetch` | global | Custom fetch for proxying or instrumentation. |
+| `exportTransport` | `'image' \| 'fetch'` | `'image'` | Image element (no CORS) or blob via fetch (needs CORS). |
+| `exportTimeout` | `number` | `20000` | Per-image timeout in ms. |
+| `allowInsecure` | `boolean` | `false` | Permit plain `http:` URLs (localhost is always allowed). |
 
 ### Layer config
 
@@ -224,7 +265,7 @@ GeoJSON automatically, and the negative result is cached per sublayer.
 - **Export images are raster.** Client-side styling and hit-testing do not apply. Use vector mode for
   interactive layers.
 - **MapServer PBF is not a thing.** Query PBF is a FeatureServer capability; MapServer layers use
-  GeoJSON.
+  GeoJSON, or Esri JSON on servers old enough to lack both.
 - **No MVT support on purpose.** If you have a `VectorTileServer`, deck.gl's `MVTLayer` over
   `GoogleMapsOverlay` is a better fit — nullisland targets arbitrary services that have no tiles
   published.

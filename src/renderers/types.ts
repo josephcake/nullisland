@@ -17,6 +17,8 @@ export interface RendererOptions {
   maxImageSize: number;
   fadeDuration: number;
   reducedMotion: boolean;
+  exportTransport: 'image' | 'fetch';
+  exportTimeout: number;
   onLoading(loading: boolean): void;
   onError(error: Error): void;
   onLoaded?(): void;

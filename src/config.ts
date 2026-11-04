@@ -45,7 +45,10 @@ const DEFAULT_MAX_FEATURES = 20_000;
 const DEFAULT_MAX_PAGES = 10;
 
 /** Parse and validate an ArcGIS REST service or layer URL. */
-export function parseServiceUrl(input: string): ServiceUrl {
+export function parseServiceUrl(
+  input: string,
+  options: {allowInsecure?: boolean} = {},
+): ServiceUrl {
   if (typeof input !== 'string' || input.trim() === '') {
     throw new NullIslandConfigError('Layer url must be a non-empty string');
   }
@@ -59,6 +62,17 @@ export function parseServiceUrl(input: string): ServiceUrl {
 
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new NullIslandConfigError(`Layer url must be http(s): ${input}`);
+  }
+
+  if (parsed.username || parsed.password) {
+    throw new NullIslandConfigError('Layer url must not contain credentials; use the apiKey option instead');
+  }
+
+  const localHosts = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+  if (parsed.protocol === 'http:' && !options.allowInsecure && !localHosts.has(parsed.hostname)) {
+    throw new NullIslandConfigError(
+      `Layer url must use https (got ${input}); pass allowInsecure: true to override`,
+    );
   }
 
   const match = /^(.*\/(mapserver|featureserver))(?:\/(\d+))?\/?$/i.exec(parsed.pathname);
@@ -75,7 +89,10 @@ export function parseServiceUrl(input: string): ServiceUrl {
   return {base, kind, layerId};
 }
 
-export function normalizeLayers(configs: ArcGisLayerConfig[]): NormalizedLayers {
+export function normalizeLayers(
+  configs: ArcGisLayerConfig[],
+  options: {allowInsecure?: boolean} = {},
+): NormalizedLayers {
   if (!Array.isArray(configs)) {
     throw new NullIslandConfigError('layers must be an array');
   }
@@ -86,7 +103,7 @@ export function normalizeLayers(configs: ArcGisLayerConfig[]): NormalizedLayers 
 
   configs.forEach((config, index) => {
     try {
-      const normalized = normalizeLayer(config, usedIds);
+      const normalized = normalizeLayer(config, usedIds, options);
       usedIds.add(normalized.id);
       layers.push(normalized);
     } catch (error) {
@@ -101,12 +118,16 @@ export function normalizeLayers(configs: ArcGisLayerConfig[]): NormalizedLayers 
   return {layers, errors};
 }
 
-export function normalizeLayer(config: ArcGisLayerConfig, usedIds: Set<string> = new Set()): NormalizedLayerConfig {
+export function normalizeLayer(
+  config: ArcGisLayerConfig,
+  usedIds: Set<string> = new Set(),
+  options: {allowInsecure?: boolean} = {},
+): NormalizedLayerConfig {
   if (!config || typeof config !== 'object') {
     throw new NullIslandConfigError('Layer config must be an object');
   }
 
-  const service = parseServiceUrl(config.url);
+  const service = parseServiceUrl(config.url, options);
   const color = config.color === undefined ? undefined : normalizeColor(config.color);
   const opacity = config.opacity === undefined ? 1 : config.opacity;
   if (!Number.isFinite(opacity) || opacity < 0 || opacity > 1) {

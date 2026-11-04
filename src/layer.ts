@@ -22,6 +22,8 @@ export interface LayerContext {
   maxImageSize: number;
   fadeDuration: number;
   reducedMotion: boolean;
+  exportTransport: 'image' | 'fetch';
+  exportTimeout: number;
   onLoading(id: string, loading: boolean): void;
   onError(error: Error): void;
   onLoaded(id: string): void;
@@ -102,6 +104,8 @@ export class LayerController implements NullIslandLayer {
       maxImageSize: this.context.maxImageSize,
       fadeDuration: this.context.fadeDuration,
       reducedMotion: this.context.reducedMotion,
+      exportTransport: this.context.exportTransport,
+      exportTimeout: this.context.exportTimeout,
       onLoading: (loading: boolean) => this.context.onLoading(this.id, loading),
       onError: (error: Error) => this.context.onError(error),
       onLoaded: () => this.context.onLoaded(this.id),

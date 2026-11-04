@@ -37,6 +37,48 @@ interface GeoJsonCollection {
   exceededTransferLimit?: boolean;
 }
 
+interface EsriJsonGeometry {
+  x?: number;
+  y?: number;
+  points?: Array<[number, number]>;
+  paths?: Array<Array<[number, number]>>;
+  rings?: Array<Array<[number, number]>>;
+}
+
+interface EsriJsonFeature {
+  attributes?: Record<string, unknown>;
+  geometry?: EsriJsonGeometry;
+}
+
+interface EsriJsonCollection {
+  features?: EsriJsonFeature[];
+  exceededTransferLimit?: boolean;
+  error?: {message?: string; code?: number};
+}
+
+/** Convert an Esri JSON geometry (outSR=4326) into the PBF shape we already draw. */
+export function esriJsonGeometryToPbf(geometry: EsriJsonGeometry | undefined): PbfGeometry {
+  if (!geometry) return {type: 'none'};
+  if (typeof geometry.x === 'number' && typeof geometry.y === 'number') {
+    return {type: 'point', coordinates: [geometry.x, geometry.y]};
+  }
+  if (Array.isArray(geometry.points)) return {type: 'multipoint', coordinates: geometry.points};
+  if (Array.isArray(geometry.paths)) return {type: 'polyline', paths: geometry.paths};
+  if (Array.isArray(geometry.rings)) {
+    return {
+      type: 'polygon',
+      rings: geometry.rings.map((ring) => {
+        const first = ring[0];
+        const last = ring[ring.length - 1];
+        return first && last && (first[0] !== last[0] || first[1] !== last[1])
+          ? [...ring, first]
+          : ring;
+      }),
+    };
+  }
+  return {type: 'none'};
+}
+
 export class VectorRenderer implements LayerRenderer {
   readonly mode = 'vector' as const;
 
@@ -198,7 +240,9 @@ export class VectorRenderer implements LayerRenderer {
         total += page.features.length;
         offset += page.features.length;
         pages += 1;
-        if (!page.exceeded || page.features.length === 0) break;
+        // Servers that do not advertise pagination cannot be paged; accept
+        // the first page rather than sending parameters they reject.
+        if (!page.exceeded || page.features.length === 0 || !sublayer.supportsPagination) break;
       }
     }
 
@@ -257,7 +301,50 @@ export class VectorRenderer implements LayerRenderer {
       }
     }
 
-    return this.fetchGeoJson(url, {...params, f: 'geojson'}, sublayer, signal);
+    if (sublayer.supportsGeoJson !== false) {
+      try {
+        return await this.fetchGeoJson(url, {...params, f: 'geojson'}, sublayer, signal);
+      } catch (error) {
+        if (sublayer.supportsGeoJson === true) throw error;
+        if (isAbortError(error)) throw error;
+        if (!(error instanceof NullIslandHttpError)) throw error;
+        sublayer.supportsGeoJson = false;
+      }
+    }
+
+    return this.fetchEsriJson(url, {...params, f: 'json'}, sublayer, signal);
+  }
+
+  private async fetchEsriJson(
+    url: string,
+    params: Record<string, string | number>,
+    sublayer: ArcGisSublayer,
+    signal: AbortSignal,
+  ): Promise<PageResult> {
+    const response = await this.options.http.request(url, params, {signal});
+    const text = await response.text();
+    let body: EsriJsonCollection;
+    try {
+      body = JSON.parse(text) as EsriJsonCollection;
+    } catch (error) {
+      throw new NullIslandHttpError('ArcGIS returned a non-JSON query response', response.status, url, {
+        cause: error,
+      });
+    }
+
+    if (body.error) {
+      throw new NullIslandHttpError(
+        body.error.message ?? 'ArcGIS query failed',
+        body.error.code ?? response.status,
+        url,
+      );
+    }
+
+    const features = (body.features ?? [])
+      .map((feature) => this.toDataFeatureFromEsriJson(sublayer, feature))
+      .filter((feature): feature is google.maps.Data.Feature => feature !== null);
+
+    return {features, exceeded: body.exceededTransferLimit === true};
   }
 
   private async fetchGeoJson(
@@ -305,10 +392,12 @@ export class VectorRenderer implements LayerRenderer {
       outFields: '*',
       returnZ: 'false',
       returnM: 'false',
-      resultOffset: offset,
       resultRecordCount: count,
     };
-    if (sublayer.objectIdField) params.orderByFields = `${sublayer.objectIdField} ASC`;
+    if (sublayer.supportsPagination) {
+      if (offset > 0) params.resultOffset = offset;
+      if (sublayer.objectIdField) params.orderByFields = `${sublayer.objectIdField} ASC`;
+    }
     return params;
   }
 
@@ -345,6 +434,24 @@ export class VectorRenderer implements LayerRenderer {
     const result = new this.options.google.maps.Data.Feature({
       geometry: dataGeometry,
       properties,
+      ...(typeof id === 'string' || typeof id === 'number' ? {id} : {}),
+    });
+    this.featureSublayer.set(result, sublayer.id);
+    return result;
+  }
+
+  private toDataFeatureFromEsriJson(
+    sublayer: ArcGisSublayer,
+    feature: EsriJsonFeature,
+  ): google.maps.Data.Feature | null {
+    const geometry = esriJsonGeometryToPbf(feature.geometry);
+    if (geometry.type === 'none') return null;
+
+    const attributes = feature.attributes ?? {};
+    const id = attributes[sublayer.objectIdField];
+    const result = new this.options.google.maps.Data.Feature({
+      geometry: this.toGoogleGeometry(geometry)!,
+      properties: attributes,
       ...(typeof id === 'string' || typeof id === 'number' ? {id} : {}),
     });
     this.featureSublayer.set(result, sublayer.id);
