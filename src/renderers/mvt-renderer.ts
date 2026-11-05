@@ -274,7 +274,7 @@ export class MvtRenderer implements LayerRenderer {
       let tileCanvas = this.tileCache.get(key);
       const cached = tileCanvas !== undefined;
       if (!tileCanvas) {
-        tileCanvas = this.renderTile(data, view.zoom);
+        tileCanvas = this.renderTile(data, view.zoom, tilePx);
         this.tileCache.set(key, tileCanvas);
       }
 
@@ -319,7 +319,7 @@ export class MvtRenderer implements LayerRenderer {
   }
 
   /** Paint one tile at its native 512 px into an offscreen canvas. */
-  private renderTile(tile: MvtTile, zoom: number): HTMLCanvasElement {
+  private renderTile(tile: MvtTile, zoom: number, tilePx: number): HTMLCanvasElement {
     // 384 keeps parcels legible at view zoom while costing ~45% less to fill
     // than 512.
     const size = 384;
@@ -345,11 +345,23 @@ export class MvtRenderer implements LayerRenderer {
 
       for (const mvtLayer of tile.layers) {
         if (mvtLayer.name !== style.sourceLayer) continue;
-        const scale = size / (mvtLayer.extent || service.extent);
+        const extent = mvtLayer.extent || service.extent;
+        const scale = size / extent;
+        // Screen size of one tile unit at the current map zoom.
+        const screenScale = tilePx / extent;
         for (const feature of mvtLayer.features) {
           const relevant =
             style.type === 'fill' ? feature.type === 'polygon' : feature.type === 'line';
           if (!relevant) continue;
+
+          // Skip features smaller than a pixel or two: at low zoom these are
+          // the bulk of a tile and painting them changes nothing on screen.
+          const bounds = featureBounds(feature);
+          if (!bounds) continue;
+          const width = (bounds[2] - bounds[0]) * screenScale;
+          const height = (bounds[3] - bounds[1]) * screenScale;
+          if (width * height < 2) continue;
+
           for (const path of feature.paths) {
             tracePath(context, path, 0, 0, scale, style.type === 'fill');
           }
@@ -412,6 +424,25 @@ function tracePath(
     else context.lineTo(px, py);
   });
   if (close) context.closePath();
+}
+
+function featureBounds(feature: import('../mvt/decode.ts').MvtFeature): [number, number, number, number] | null {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const path of feature.paths) {
+    for (const [x, y] of path) {
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+
+  if (!Number.isFinite(minX)) return null;
+  return [minX, minY, maxX, maxY];
 }
 
 function countFeatures(tiles: Array<MvtTile | null>): number {

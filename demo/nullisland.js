@@ -2539,7 +2539,7 @@ var MvtRenderer = class {
       let tileCanvas = this.tileCache.get(key);
       const cached = tileCanvas !== void 0;
       if (!tileCanvas) {
-        tileCanvas = this.renderTile(data, view.zoom);
+        tileCanvas = this.renderTile(data, view.zoom, tilePx);
         this.tileCache.set(key, tileCanvas);
       }
       context.drawImage(
@@ -2577,7 +2577,7 @@ var MvtRenderer = class {
     this.overlay.setBounds(bbox);
   }
   /** Paint one tile at its native 512 px into an offscreen canvas. */
-  renderTile(tile, zoom) {
+  renderTile(tile, zoom, tilePx) {
     const size = 384;
     const canvas = document.createElement("canvas");
     canvas.width = size;
@@ -2594,10 +2594,17 @@ var MvtRenderer = class {
       let hasGeometry = false;
       for (const mvtLayer of tile.layers) {
         if (mvtLayer.name !== style.sourceLayer) continue;
-        const scale = size / (mvtLayer.extent || service.extent);
+        const extent = mvtLayer.extent || service.extent;
+        const scale = size / extent;
+        const screenScale = tilePx / extent;
         for (const feature of mvtLayer.features) {
           const relevant = style.type === "fill" ? feature.type === "polygon" : feature.type === "line";
           if (!relevant) continue;
+          const bounds = featureBounds(feature);
+          if (!bounds) continue;
+          const width = (bounds[2] - bounds[0]) * screenScale;
+          const height = (bounds[3] - bounds[1]) * screenScale;
+          if (width * height < 2) continue;
           for (const path of feature.paths) {
             tracePath(context, path, 0, 0, scale, style.type === "fill");
           }
@@ -2646,6 +2653,22 @@ function tracePath(context, points, offsetX, offsetY, scale, close) {
     else context.lineTo(px, py);
   });
   if (close) context.closePath();
+}
+function featureBounds(feature) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const path of feature.paths) {
+    for (const [x, y] of path) {
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (!Number.isFinite(minX)) return null;
+  return [minX, minY, maxX, maxY];
 }
 function countFeatures(tiles) {
   let total = 0;
