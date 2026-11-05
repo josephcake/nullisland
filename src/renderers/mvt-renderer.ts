@@ -138,7 +138,7 @@ export class MvtRenderer implements LayerRenderer {
     ) {
       return;
     }
-    const z = clamp(Math.round(view.zoom) - 1, service.minZoom, service.maxZoom);
+    const z = clamp(Math.round(view.zoom), service.minZoom, service.maxZoom);
     const key = `${z}|${view.zoom.toFixed(2)}|${bbox.map((value) => value.toFixed(4)).join(',')}`;
     if (key === this.renderedKey) return;
 
@@ -157,6 +157,18 @@ export class MvtRenderer implements LayerRenderer {
         tiles.map((tile) => this.loadTile(tile, controller.signal)),
       );
       if (generation !== this.generation) return;
+
+      const featureCount = countFeatures(decoded);
+      if (featureCount > this.options.layer.maxFeatures) {
+        // At low zoom the viewport can contain the whole dataset (tens of
+        // thousands of parcels). Drawing that on the CPU is not viable, and
+        // the layer is unreadable anyway — wait for the user to zoom in.
+        this.clearCanvas(view, bbox);
+        this.renderedKey = key;
+        this.lastBbox = bbox;
+        this.lastZoom = view.zoom;
+        return;
+      }
 
       await this.draw(view, bbox, z, tiles, decoded, generation);
       if (generation !== this.generation) return;
@@ -291,6 +303,21 @@ export class MvtRenderer implements LayerRenderer {
     }
   }
 
+  private clearCanvas(view: Viewport, bbox: BBox): void {
+    const canvas = this.overlay.getCanvas();
+    if (!canvas) return;
+    const {padding} = this.options;
+    const cssWidth = Math.max(1, Math.round(view.width * (1 + padding * 2)));
+    const cssHeight = Math.max(1, Math.round(view.height * (1 + padding * 2)));
+    canvas.style.width = `${cssWidth}px`;
+    canvas.style.height = `${cssHeight}px`;
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    this.overlay.setBounds(bbox);
+  }
+
   /** Paint one tile at its native 512 px into an offscreen canvas. */
   private renderTile(tile: MvtTile, zoom: number): HTMLCanvasElement {
     // 384 keeps parcels legible at view zoom while costing ~45% less to fill
@@ -385,6 +412,14 @@ function tracePath(
     else context.lineTo(px, py);
   });
   if (close) context.closePath();
+}
+
+function countFeatures(tiles: Array<MvtTile | null>): number {
+  let total = 0;
+  for (const tile of tiles) {
+    for (const layer of tile?.layers ?? []) total += layer.features.length;
+  }
+  return total;
 }
 
 function intersects(a: BBox, b: BBox): boolean {

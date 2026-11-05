@@ -2442,7 +2442,7 @@ var MvtRenderer = class {
     if (this.lastBbox && view.zoom === this.lastZoom && bboxContains(this.lastBbox, view.bounds4326)) {
       return;
     }
-    const z = clamp(Math.round(view.zoom) - 1, service.minZoom, service.maxZoom);
+    const z = clamp(Math.round(view.zoom), service.minZoom, service.maxZoom);
     const key = `${z}|${view.zoom.toFixed(2)}|${bbox.map((value) => value.toFixed(4)).join(",")}`;
     if (key === this.renderedKey) return;
     const generation = ++this.generation;
@@ -2459,6 +2459,14 @@ var MvtRenderer = class {
         tiles.map((tile) => this.loadTile(tile, controller.signal))
       );
       if (generation !== this.generation) return;
+      const featureCount = countFeatures(decoded);
+      if (featureCount > this.options.layer.maxFeatures) {
+        this.clearCanvas(view, bbox);
+        this.renderedKey = key;
+        this.lastBbox = bbox;
+        this.lastZoom = view.zoom;
+        return;
+      }
       await this.draw(view, bbox, z, tiles, decoded, generation);
       if (generation !== this.generation) return;
       this.overlay.setBounds(bbox);
@@ -2554,6 +2562,20 @@ var MvtRenderer = class {
       }
     }
   }
+  clearCanvas(view, bbox) {
+    const canvas = this.overlay.getCanvas();
+    if (!canvas) return;
+    const { padding } = this.options;
+    const cssWidth = Math.max(1, Math.round(view.width * (1 + padding * 2)));
+    const cssHeight = Math.max(1, Math.round(view.height * (1 + padding * 2)));
+    canvas.style.width = `${cssWidth}px`;
+    canvas.style.height = `${cssHeight}px`;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    this.overlay.setBounds(bbox);
+  }
   /** Paint one tile at its native 512 px into an offscreen canvas. */
   renderTile(tile, zoom) {
     const size = 384;
@@ -2624,6 +2646,13 @@ function tracePath(context, points, offsetX, offsetY, scale, close) {
     else context.lineTo(px, py);
   });
   if (close) context.closePath();
+}
+function countFeatures(tiles) {
+  let total = 0;
+  for (const tile of tiles) {
+    for (const layer of tile?.layers ?? []) total += layer.features.length;
+  }
+  return total;
 }
 function intersects(a, b) {
   return a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1];

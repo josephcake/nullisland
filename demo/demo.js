@@ -24,7 +24,7 @@ const LAYERS = [
     color: '#2f9e44',
     url: 'https://vectortileservices3.arcgis.com/GVgbJbqm8hXASVYi/arcgis/rest/services/Santa_Monica_Mountains_Parcels_VTL/VectorTileServer',
     opacity: 0.8,
-    minZoom: 12,
+    minZoom: 13,
     maxZoom: 17,
   },
 ];
