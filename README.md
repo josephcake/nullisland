@@ -18,7 +18,7 @@
 layer on your map — PBF features when the service serves them, a server-rendered image when it
 doesn't. Public layers need no token.
 
-![nullisland drawing NWS watches and warnings on Google Maps](https://raw.githubusercontent.com/josephcake/nullisland/main/assets/demo.png)
+![nullisland drawing NWS watches and warnings on Google Maps](https://raw.githubusercontent.com/josephcake/nullisland/main/assets/demo-map.png)
 
 *The demo, drawing the public NWS watches and warnings service on Google Maps.*
 
