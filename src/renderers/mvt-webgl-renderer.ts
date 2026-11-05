@@ -287,7 +287,10 @@ export class MvtWebGLRenderer implements LayerRenderer {
     const canvas = this.overlay.getCanvas();
     if (!canvas) return;
     const gl = this.ensureGl(canvas);
-    if (!gl || !this.program) return;
+    if (!gl || !this.program) {
+      if (typeof console !== 'undefined') console.warn('[nullisland webgl] no GL context or program');
+      return;
+    }
 
     const {padding, service} = this.options;
     const dpr = Math.min(view.dpr, 2);
@@ -367,6 +370,15 @@ export class MvtWebGLRenderer implements LayerRenderer {
     }
 
     this.overlay.setBounds(plan.bbox);
+
+    if (typeof console !== 'undefined') {
+      let meshes = 0;
+      for (const tile of tiles) {
+        const set = this.meshes.get(`${tile.z}/${tile.x}/${tile.y}`);
+        if (set) meshes += set.fills.size;
+      }
+      console.debug(`[nullisland webgl] ${tiles.length} tiles, ${meshes} meshes, ${deviceWidth}x${deviceHeight}`);
+    }
   }
 
   private getGpuMesh(
@@ -464,6 +476,9 @@ function createProgram(
     gl.shaderSource(shader, source);
     gl.compileShader(shader);
     if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      if (typeof console !== 'undefined') {
+        console.warn('[nullisland webgl] shader compile failed', gl.getShaderInfoLog(shader));
+      }
       gl.deleteShader(shader);
       return null;
     }
@@ -482,6 +497,9 @@ function createProgram(
   gl.deleteShader(vertex);
   gl.deleteShader(fragment);
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    if (typeof console !== 'undefined') {
+      console.warn('[nullisland webgl] program link failed', gl.getProgramInfoLog(program));
+    }
     gl.deleteProgram(program);
     return null;
   }
