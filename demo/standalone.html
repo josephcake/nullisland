@@ -2692,7 +2692,8 @@ var MvtRenderer = class {
   }
   async render(view) {
     if (!this.attached) return;
-    const { service, padding } = this.options;
+    const { service } = this.options;
+    const padding = Math.min(this.options.padding, 0.15);
     const bbox = padBBox(view.bounds4326, padding);
     if (this.lastBbox && view.zoom === this.lastZoom && bboxContains(this.lastBbox, view.bounds4326)) {
       return;
@@ -2752,7 +2753,7 @@ var MvtRenderer = class {
   async draw(view, bbox, z, tiles, decoded, generation) {
     const canvas = this.overlay.getCanvas();
     if (!canvas) return;
-    const { padding } = this.options;
+    const padding = Math.min(this.options.padding, 0.15);
     const dpr = Math.min(view.dpr, 2);
     const cssWidth = Math.max(1, Math.round(view.width * (1 + padding * 2)));
     const cssHeight = Math.max(1, Math.round(view.height * (1 + padding * 2)));
@@ -2811,7 +2812,7 @@ var MvtRenderer = class {
   }
   /** Paint one tile at its native 512 px into an offscreen canvas. */
   renderTile(tile, zoom) {
-    const size = 512;
+    const size = 384;
     const canvas = document.createElement("canvas");
     canvas.width = size;
     canvas.height = size;
@@ -2843,10 +2844,10 @@ var MvtRenderer = class {
         context.fillStyle = style.fillColor ?? "rgba(76, 125, 255, 0.45)";
         context.fill("nonzero");
       }
-      if (style.lineColor) {
+      if (style.lineColor && style.type === "line") {
         context.globalAlpha = style.lineOpacity ?? 1;
         context.strokeStyle = style.lineColor;
-        context.lineWidth = style.lineWidth ?? (style.type === "fill" ? 1 : 1.5);
+        context.lineWidth = style.lineWidth ?? 1.5;
         context.stroke();
       }
     }

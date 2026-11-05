@@ -125,7 +125,8 @@ export class MvtRenderer implements LayerRenderer {
   private async render(view: Viewport): Promise<void> {
     if (!this.attached) return;
 
-    const {service, padding} = this.options;
+    const {service} = this.options;
+    const padding = Math.min(this.options.padding, 0.15);
     const bbox = padBBox(view.bounds4326, padding);
 
     // The canvas is anchored to its bbox, so panning inside the padding needs
@@ -215,7 +216,7 @@ export class MvtRenderer implements LayerRenderer {
     const canvas = this.overlay.getCanvas();
     if (!canvas) return;
 
-    const {padding} = this.options;
+    const padding = Math.min(this.options.padding, 0.15);
     const dpr = Math.min(view.dpr, 2);
     const cssWidth = Math.max(1, Math.round(view.width * (1 + padding * 2)));
     const cssHeight = Math.max(1, Math.round(view.height * (1 + padding * 2)));
@@ -292,7 +293,9 @@ export class MvtRenderer implements LayerRenderer {
 
   /** Paint one tile at its native 512 px into an offscreen canvas. */
   private renderTile(tile: MvtTile, zoom: number): HTMLCanvasElement {
-    const size = 512;
+    // 384 keeps parcels legible at view zoom while costing ~45% less to fill
+    // than 512.
+    const size = 384;
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
@@ -334,10 +337,12 @@ export class MvtRenderer implements LayerRenderer {
         context.fillStyle = style.fillColor ?? 'rgba(76, 125, 255, 0.45)';
         context.fill('nonzero');
       }
-      if (style.lineColor) {
+      // Stroking thousands of fill rings is the expensive half of rasterising
+      // a dense tile; fills alone read fine at these zooms.
+      if (style.lineColor && style.type === 'line') {
         context.globalAlpha = style.lineOpacity ?? 1;
         context.strokeStyle = style.lineColor;
-        context.lineWidth = style.lineWidth ?? (style.type === 'fill' ? 1 : 1.5);
+        context.lineWidth = style.lineWidth ?? 1.5;
         context.stroke();
       }
     }
