@@ -2365,6 +2365,7 @@ var MvtRenderer = class {
     __publicField(this, "mode", "mvt");
     __publicField(this, "overlay");
     __publicField(this, "cache");
+    __publicField(this, "tileCache");
     __publicField(this, "controller", null);
     __publicField(this, "generation", 0);
     __publicField(this, "attached", false);
@@ -2376,6 +2377,7 @@ var MvtRenderer = class {
     __publicField(this, "lastZoom", Number.NaN);
     this.opacity = options.opacity;
     this.cache = new LRU(64);
+    this.tileCache = new LRU(48);
     this.overlay = new MvtCanvasOverlay(options.google, options.map);
   }
   attach() {
@@ -2420,6 +2422,7 @@ var MvtRenderer = class {
     this.controller?.abort();
     this.overlay.destroy();
     this.cache.clear();
+    this.tileCache.clear();
     this.attached = false;
     this.lastView = null;
     this.lastBbox = null;
@@ -2492,7 +2495,7 @@ var MvtRenderer = class {
   draw(view, bbox, z, tiles, decoded) {
     const canvas = this.overlay.getCanvas();
     if (!canvas) return;
-    const { padding, service } = this.options;
+    const { padding } = this.options;
     const dpr = view.dpr;
     const cssWidth = Math.max(1, Math.round(view.width * (1 + padding * 2)));
     const cssHeight = Math.max(1, Math.round(view.height * (1 + padding * 2)));
@@ -2504,50 +2507,72 @@ var MvtRenderer = class {
     if (!context) return;
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
     context.clearRect(0, 0, cssWidth, cssHeight);
-    context.globalAlpha = this.opacity;
-    context.lineJoin = "round";
-    context.lineCap = "round";
     const northWest = lngLatToWorld(bbox[0], bbox[3]);
     const originX = northWest.x * 256 * 2 ** view.zoom;
     const originY = northWest.y * 256 * 2 ** view.zoom;
     const tilePx = 256 * 2 ** (view.zoom - z);
-    const styles = service.styleLayers.length > 0 ? service.styleLayers : this.fallbackStyles(decoded);
+    context.globalAlpha = this.opacity;
+    for (let index = 0; index < tiles.length; index += 1) {
+      const data = decoded[index];
+      if (!data) continue;
+      const tile = tiles[index];
+      const key = `${z}/${tile.x}/${tile.y}`;
+      let tileCanvas = this.tileCache.get(key);
+      if (!tileCanvas) {
+        tileCanvas = this.renderTile(data, view.zoom);
+        this.tileCache.set(key, tileCanvas);
+      }
+      context.drawImage(
+        tileCanvas,
+        tile.x * tilePx - originX,
+        tile.y * tilePx - originY,
+        tilePx,
+        tilePx
+      );
+    }
+  }
+  /** Paint one tile at its native 512 px into an offscreen canvas. */
+  renderTile(tile, zoom) {
+    const size = 512;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext("2d");
+    if (!context) return canvas;
+    const { service } = this.options;
+    const styles = service.styleLayers.length > 0 ? service.styleLayers : this.fallbackStyles([tile]);
+    context.lineJoin = "round";
+    context.lineCap = "round";
     for (const style of styles) {
-      if (!styleVisible(style, view.zoom)) continue;
+      if (!styleVisible(style, zoom)) continue;
       context.beginPath();
       let hasGeometry = false;
-      for (let index = 0; index < tiles.length; index += 1) {
-        const data = decoded[index];
-        if (!data) continue;
-        const tile = tiles[index];
-        const offsetX = tile.x * tilePx - originX;
-        const offsetY = tile.y * tilePx - originY;
-        for (const mvtLayer of data.layers) {
-          if (mvtLayer.name !== style.sourceLayer) continue;
-          const scale = tilePx / (mvtLayer.extent || service.extent);
-          for (const feature of mvtLayer.features) {
-            const relevant = style.type === "fill" ? feature.type === "polygon" : feature.type === "line";
-            if (!relevant) continue;
-            for (const path of feature.paths) {
-              tracePath(context, path, offsetX, offsetY, scale, style.type === "fill");
-            }
-            hasGeometry = true;
+      for (const mvtLayer of tile.layers) {
+        if (mvtLayer.name !== style.sourceLayer) continue;
+        const scale = size / (mvtLayer.extent || service.extent);
+        for (const feature of mvtLayer.features) {
+          const relevant = style.type === "fill" ? feature.type === "polygon" : feature.type === "line";
+          if (!relevant) continue;
+          for (const path of feature.paths) {
+            tracePath(context, path, 0, 0, scale, style.type === "fill");
           }
+          hasGeometry = true;
         }
       }
       if (!hasGeometry) continue;
       if (style.type === "fill") {
-        context.globalAlpha = this.opacity * (style.fillOpacity ?? 1);
+        context.globalAlpha = style.fillOpacity ?? 1;
         context.fillStyle = style.fillColor ?? "rgba(76, 125, 255, 0.45)";
         context.fill("nonzero");
       }
       if (style.lineColor) {
-        context.globalAlpha = this.opacity * (style.lineOpacity ?? 1);
+        context.globalAlpha = style.lineOpacity ?? 1;
         context.strokeStyle = style.lineColor;
         context.lineWidth = style.lineWidth ?? (style.type === "fill" ? 1 : 1.5);
         context.stroke();
       }
     }
+    return canvas;
   }
   fallbackStyles(decoded) {
     const names = /* @__PURE__ */ new Set();
