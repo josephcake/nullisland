@@ -31,6 +31,8 @@ doesn't. Public layers need no token.
 - **Viewport only.** Queries snap to the tile grid, cache what they fetch, and abort when the map
   moves on.
 - **No token by default.** ArcGIS authentication is opt-in, with automatic retry on 498/499.
+- **GPU for vector tiles.** MVT tiles are triangulated once and drawn with WebGL; canvas is the
+  fallback.
 - **No runtime dependencies.** ESM and CJS builds with TypeScript types.
 
 ## Install
@@ -92,6 +94,16 @@ Each layer picks its own strategy:
 Vector layers query only the visible viewport, prefer `f=pbf`, fall back to GeoJSON then Esri JSON,
 cache tile-aligned results, and abort requests the user has already panned past.
 
+### Vector tile services
+
+Pass a `.../VectorTileServer` URL. Discovery reads its `tileInfo` and `resources/styles/root.json`,
+tiles decode as MVT, and each tile is triangulated once (earcut) and drawn through a WebGL painter —
+one draw call per tile per style layer. If WebGL2 is unavailable the canvas painter is used; force
+either with `renderer: 'webgl' | 'canvas'` on the layer.
+
+MVT paint support is limited to fill and line colours/widths with literal values. Labels and feature
+picking are not implemented yet.
+
 ## API
 
 ### `new NullIsland(options)`
@@ -126,6 +138,8 @@ cache tile-aligned results, and abort requests the user has already panned past.
 | `visible` | `boolean` | `true` | Initial state. |
 | `mode` | `'auto' \| 'export' \| 'vector'` | `'auto'` | Force a strategy. |
 | `sublayers` | `number[]` | all | MapServer sublayer ids to include. |
+| `styleUrl` | `string` | service root.json | Style document for a `VectorTileServer`. |
+| `renderer` | `'auto' \| 'webgl' \| 'canvas'` | `'auto'` | Painter for MVT sources. |
 | `maxFeatures` | `number` | `20000` | Per-viewport feature cap. |
 | `maxPages` | `number` | `10` | Per-viewport page cap. |
 
@@ -165,6 +179,7 @@ const arc = new NullIsland({
   thousands.
 - **Export is raster.** No client-side styling, picking or querying.
 - **MapServer has no PBF.** Those layers use GeoJSON, or Esri JSON on older servers.
+- **MVT is fill/line only.** No labels, no picking, and one style colour per source layer.
 - **No MVT.** For a `VectorTileServer`, use deck.gl's `MVTLayer` over `GoogleMapsOverlay`.
 
 ## Design notes

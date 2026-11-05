@@ -10,6 +10,7 @@ import type {NormalizedLayerConfig} from './config.ts';
 import {ExportRenderer} from './renderers/export-renderer.ts';
 import {VectorRenderer} from './renderers/vector-renderer.ts';
 import {MvtRenderer} from './renderers/mvt-renderer.ts';
+import {MvtWebGLRenderer, supportsWebGL2} from './renderers/mvt-webgl-renderer.ts';
 import type {LayerRenderer} from './renderers/types.ts';
 import type {HttpClient} from './http.ts';
 import type {NullIslandLayer, NullIslandSublayer, LayerState, ResolvedMode} from './types.ts';
@@ -94,7 +95,10 @@ export class LayerController implements NullIslandLayer {
       this.layerTitle = this.config.title ?? vectorTiles.title;
       this.minZoom = this.config.minZoom ?? vectorTiles.minZoom;
       this.maxZoom = this.config.maxZoom ?? vectorTiles.maxZoom;
-      this.renderer = new MvtRenderer({
+      const useWebGL =
+        this.config.renderer !== 'canvas' &&
+        (this.config.renderer === 'webgl' || supportsWebGL2());
+      const mvtOptions = {
         map: this.context.map,
         google: this.context.google,
         http: this.context.http,
@@ -104,7 +108,8 @@ export class LayerController implements NullIslandLayer {
         padding: this.context.padding,
         onLoading: (loading: boolean) => this.context.onLoading(this.id, loading),
         onError: (error: Error) => this.context.onError(error),
-      });
+      };
+      this.renderer = useWebGL ? new MvtWebGLRenderer(mvtOptions) : new MvtRenderer(mvtOptions);
       this.state = 'ready';
       if (this.isVisible && this.currentView) this.sync(this.currentView);
       return;

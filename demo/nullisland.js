@@ -174,6 +174,7 @@ function normalizeLayer(config, usedIds = /* @__PURE__ */ new Set(), options = {
     mode,
     sublayers,
     styleUrl: config.styleUrl,
+    renderer: config.renderer ?? "auto",
     maxFeatures,
     maxPages
   };
@@ -1466,10 +1467,10 @@ function decodeGeometry(reader, transform, stride, fallbackGeometryType) {
   }
 }
 function decodeParts(coords, lengths, stride, transform = null) {
-  const counts = lengths.length > 0 ? lengths : [Math.floor(coords.length / Math.max(stride, 2))];
+  const counts2 = lengths.length > 0 ? lengths : [Math.floor(coords.length / Math.max(stride, 2))];
   const parts = [];
   let cursor = 0;
-  for (const count of counts) {
+  for (const count of counts2) {
     let x = 0;
     let y = 0;
     const part = [];
@@ -1508,8 +1509,8 @@ function pointInRing(point, ring) {
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
     const [xi, yi] = ring[i];
     const [xj, yj] = ring[j];
-    const intersects2 = yi > point[1] !== yj > point[1] && point[0] < (xj - xi) * (point[1] - yi) / (yj - yi) + xi;
-    if (intersects2) inside = !inside;
+    const intersects3 = yi > point[1] !== yj > point[1] && point[0] < (xj - xi) * (point[1] - yi) / (yj - yi) + xi;
+    if (intersects3) inside = !inside;
   }
   return inside;
 }
@@ -1517,7 +1518,7 @@ function groupRings(rings) {
   const closed = rings.map(closeRing).filter((ring) => ring.length >= 4);
   if (closed.length === 0) return [];
   const areas = closed.map((ring) => signedArea(ring));
-  const hasClockwise = areas.some((area) => area < 0);
+  const hasClockwise = areas.some((area2) => area2 < 0);
   if (!hasClockwise) {
     const outer = closed[0];
     const polygons2 = [[outer]];
@@ -1741,9 +1742,9 @@ function snapBBox(bbox, zoom, snapDelta = 1) {
     };
   });
   const seen = /* @__PURE__ */ new Set();
-  return areas.filter((area) => {
-    if (seen.has(area.key)) return false;
-    seen.add(area.key);
+  return areas.filter((area2) => {
+    if (seen.has(area2.key)) return false;
+    seen.add(area2.key);
     return true;
   });
 }
@@ -1803,7 +1804,7 @@ var VectorRenderer = class {
   }
   update(view) {
     const areas = snapBBox(view.bounds4326, view.zoom);
-    const key = areas.map((area) => area.key).join("|");
+    const key = areas.map((area2) => area2.key).join("|");
     if (key === this.renderedKey) return;
     const cached = this.cache.get(key);
     if (cached) {
@@ -1814,7 +1815,7 @@ var VectorRenderer = class {
   }
   prefetch(view) {
     const areas = snapBBox(view.bounds4326, view.zoom);
-    const key = areas.map((area) => area.key).join("|");
+    const key = areas.map((area2) => area2.key).join("|");
     if (key === this.renderedKey || this.cache.has(key)) return;
     void this.load(areas, key, false);
   }
@@ -1881,7 +1882,7 @@ var VectorRenderer = class {
     this.setLoading(true);
     try {
       const groups = await Promise.all(
-        areas.map((area) => this.loadArea(area, controller.signal))
+        areas.map((area2) => this.loadArea(area2, controller.signal))
       );
       if (generation !== this.generation) return;
       const features = groups.flat();
@@ -1893,7 +1894,7 @@ var VectorRenderer = class {
       if (generation === this.generation) this.setLoading(false);
     }
   }
-  async loadArea(area, signal) {
+  async loadArea(area2, signal) {
     const features = [];
     for (const sublayer of this.options.service.sublayers) {
       if (!sublayer.supportsQuery) continue;
@@ -1903,7 +1904,7 @@ var VectorRenderer = class {
       const pageSize = Math.min(Math.max(sublayer.maxRecordCount, 1), 2e3);
       while (pages < this.options.layer.maxPages && total < this.options.layer.maxFeatures) {
         if (signal.aborted) return features;
-        const page = await this.fetchPage(sublayer, area, offset, pageSize, signal);
+        const page = await this.fetchPage(sublayer, area2, offset, pageSize, signal);
         features.push(...page.features);
         total += page.features.length;
         offset += page.features.length;
@@ -1913,11 +1914,11 @@ var VectorRenderer = class {
     }
     return features;
   }
-  async fetchPage(sublayer, area, offset, count, signal) {
+  async fetchPage(sublayer, area2, offset, count, signal) {
     const url = `${this.options.service.url}/${sublayer.id}/query`;
-    const params = this.baseParams(sublayer, area, offset, count);
+    const params = this.baseParams(sublayer, area2, offset, count);
     if (this.options.service.kind === "FeatureServer" && sublayer.supportsPbf !== false) {
-      const tolerance = quantizationTolerance(area.z);
+      const tolerance = quantizationTolerance(area2.z);
       const pbfParams = {
         ...params,
         f: "pbf",
@@ -2000,10 +2001,10 @@ var VectorRenderer = class {
     const features = (body.features ?? []).map((feature) => this.toDataFeatureFromGeoJson(sublayer, feature)).filter((feature) => feature !== null);
     return { features, exceeded: body.exceededTransferLimit === true };
   }
-  baseParams(sublayer, area, offset, count) {
+  baseParams(sublayer, area2, offset, count) {
     const params = {
       where: "1=1",
-      geometry: area.bbox.join(","),
+      geometry: area2.bbox.join(","),
       geometryType: "esriGeometryEnvelope",
       inSR: "4326",
       outSR: "4326",
@@ -2768,6 +2769,1107 @@ var MvtCanvasOverlay = class {
   }
 };
 
+// src/mvt/scheduler.ts
+function planTiles(view, minZoom, maxZoom, padding) {
+  const z = clamp(Math.round(view.zoom), minZoom, maxZoom);
+  const bbox = padBBox(view.bounds4326, padding);
+  const max = 2 ** z - 1;
+  const x0 = clamp(Math.floor(tileX(bbox[0], z)), 0, max);
+  const x1 = clamp(Math.floor(tileX(bbox[2], z)), 0, max);
+  const y0 = clamp(Math.floor(tileY(bbox[3], z)), 0, max);
+  const y1 = clamp(Math.floor(tileY(bbox[1], z)), 0, max);
+  const tiles = [];
+  for (let x = x0; x <= x1; x += 1) {
+    for (let y = y0; y <= y1; y += 1) tiles.push({ z, x, y });
+  }
+  const northWest = lngLatToWorld(bbox[0], bbox[3]);
+  return {
+    z,
+    tiles,
+    bbox,
+    tilePx: 256 * 2 ** (view.zoom - z),
+    originX: northWest.x * 256 * 2 ** view.zoom,
+    originY: northWest.y * 256 * 2 ** view.zoom
+  };
+}
+
+// node_modules/earcut/src/earcut.js
+var steiners = /* @__PURE__ */ new Set();
+var filteredOut = false;
+function earcut(data, holeIndices, dim = 2) {
+  const hasHoles = holeIndices && holeIndices.length;
+  const outerLen = hasHoles ? holeIndices[0] * dim : data.length;
+  if (steiners.size) steiners.clear();
+  let outerNode = linkedList(data, 0, outerLen, dim, true);
+  const triangles = [];
+  if (!outerNode || outerNode.next === outerNode.prev) return triangles;
+  let minX = 0, minY = 0, invSize = 0;
+  if (hasHoles) outerNode = eliminateHoles(data, holeIndices, outerNode, dim);
+  if (data.length > 80 * dim) {
+    minX = data[0];
+    minY = data[1];
+    let maxX = minX;
+    let maxY = minY;
+    for (let i = dim; i < outerLen; i += dim) {
+      const x = data[i];
+      const y = data[i + 1];
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+    invSize = Math.max(maxX - minX, maxY - minY);
+    invSize = invSize !== 0 ? 32767 / invSize : 0;
+  }
+  earcutLinked(outerNode, triangles, minX, minY, invSize);
+  return triangles;
+}
+function linkedList(data, start, end, dim, clockwise) {
+  let last = null;
+  if (clockwise === signedArea2(data, start, end, dim) > 0) {
+    for (let i = start; i < end; i += dim) last = insertNode(i / dim | 0, data[i], data[i + 1], last);
+  } else {
+    for (let i = end - dim; i >= start; i -= dim) last = insertNode(i / dim | 0, data[i], data[i + 1], last);
+  }
+  if (last && equals(last, last.next)) {
+    removeNode(last);
+    last = last.next;
+  }
+  return last;
+}
+function filterPoints(start, end = start) {
+  const full = end === start;
+  let p = start, again;
+  do {
+    again = false;
+    if (p !== p.next && (steiners.size === 0 || !steiners.has(p)) && (equals(p, p.next) || area(p.prev, p, p.next) === 0)) {
+      if (full || p === end) end = p.prev;
+      filteredOut = true;
+      removeNode(p);
+      p = p.prev;
+      again = true;
+    } else if (full || p !== end) {
+      p = p.next;
+      again = !full;
+    }
+  } while (again || p !== end);
+  return end;
+}
+function earcutLinked(ear, triangles, minX, minY, invSize) {
+  if (invSize) indexCurve(ear, minX, minY, invSize);
+  let stop = ear, cured = false;
+  while (ear.prev !== ear.next) {
+    const prev = ear.prev;
+    const next = ear.next;
+    if (area(prev, ear, next) < 0 && (invSize ? isEarHashed(ear, minX, minY, invSize) : isEar(ear))) {
+      triangles.push(prev.i, ear.i, next.i);
+      removeNode(ear);
+      ear = next;
+      stop = next;
+      continue;
+    }
+    ear = next;
+    if (ear === stop) {
+      filteredOut = false;
+      ear = filterPoints(ear);
+      if (filteredOut) {
+        stop = ear;
+        continue;
+      }
+      if (!cured) {
+        ear = cureLocalIntersections(ear, triangles);
+        stop = ear;
+        cured = true;
+        continue;
+      }
+      splitEarcut(ear, triangles, minX, minY, invSize);
+      break;
+    }
+  }
+}
+function isEar(ear) {
+  const a = ear.prev, b = ear, c = ear.next, ax = a.x, bx = b.x, cx = c.x, ay = a.y, by = b.y, cy = c.y, x0 = Math.min(ax, bx, cx), y0 = Math.min(ay, by, cy), x1 = Math.max(ax, bx, cx), y1 = Math.max(ay, by, cy);
+  let p = c.next;
+  while (p !== a) {
+    if (p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1 && !(ax === p.x && ay === p.y) && pointInTriangle(ax, ay, bx, by, cx, cy, p.x, p.y) && area(p.prev, p, p.next) >= 0) return false;
+    p = p.next;
+  }
+  return true;
+}
+function isEarHashed(ear, minX, minY, invSize) {
+  const a = ear.prev, b = ear, c = ear.next, ax = a.x, bx = b.x, cx = c.x, ay = a.y, by = b.y, cy = c.y, x0 = Math.min(ax, bx, cx), y0 = Math.min(ay, by, cy), x1 = Math.max(ax, bx, cx), y1 = Math.max(ay, by, cy), minZ = zOrder(x0, y0, minX, minY, invSize), maxZ = zOrder(x1, y1, minX, minY, invSize);
+  let p = ear.prevZ;
+  while (p && p.z >= minZ) {
+    if (p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1 && p !== c && !(ax === p.x && ay === p.y) && pointInTriangle(ax, ay, bx, by, cx, cy, p.x, p.y) && area(p.prev, p, p.next) >= 0) return false;
+    p = p.prevZ;
+  }
+  let n = ear.nextZ;
+  while (n && n.z <= maxZ) {
+    if (n.x >= x0 && n.x <= x1 && n.y >= y0 && n.y <= y1 && n !== c && !(ax === n.x && ay === n.y) && pointInTriangle(ax, ay, bx, by, cx, cy, n.x, n.y) && area(n.prev, n, n.next) >= 0) return false;
+    n = n.nextZ;
+  }
+  return true;
+}
+function cureLocalIntersections(start, triangles) {
+  let p = start;
+  let cured = false;
+  do {
+    const a = p.prev, b = p.next.next;
+    if (intersects2(a, p, p.next, b, false) && locallyInside(a, b) && locallyInside(b, a)) {
+      triangles.push(a.i, p.i, b.i);
+      removeNode(p);
+      removeNode(p.next);
+      p = start = b;
+      cured = true;
+    }
+    p = p.next;
+  } while (p !== start);
+  return cured ? filterPoints(p) : p;
+}
+function splitEarcut(start, triangles, minX, minY, invSize) {
+  let a = start;
+  do {
+    let b = a.next.next;
+    while (b !== a.prev) {
+      if (a.i !== b.i && isValidDiagonal(a, b)) {
+        let c = splitPolygon(a, b);
+        a = filterPoints(a, a.next);
+        c = filterPoints(c, c.next);
+        earcutLinked(a, triangles, minX, minY, invSize);
+        earcutLinked(c, triangles, minX, minY, invSize);
+        return;
+      }
+      b = b.next;
+    }
+    a = a.next;
+  } while (a !== start);
+}
+var indexActive = false;
+function eliminateHoles(data, holeIndices, outerNode, dim) {
+  const queue = [];
+  for (let i = 0, len = holeIndices.length; i < len; i++) {
+    const start = holeIndices[i] * dim;
+    const end = i < len - 1 ? holeIndices[i + 1] * dim : data.length;
+    const list = (
+      /** @type {Node} */
+      linkedList(data, start, end, dim, false)
+    );
+    if (list === list.next) steiners.add(list);
+    queue.push(getLeftmost(list));
+  }
+  queue.sort(compareXYSlope);
+  buildBlockIndex(data.length / dim, holeIndices.length);
+  indexSegment(outerNode, outerNode);
+  indexActive = true;
+  for (let i = 0; i < queue.length; i++) {
+    outerNode = eliminateHole(queue[i], outerNode);
+  }
+  indexActive = false;
+  return filterPoints(outerNode);
+}
+function compareXYSlope(a, b) {
+  return a.x - b.x || a.y - b.y || (a.next.y - a.y) / (a.next.x - a.x) - (b.next.y - b.y) / (b.next.x - b.x);
+}
+function eliminateHole(hole, outerNode) {
+  const bridge = findHoleBridge(hole, outerNode);
+  if (!bridge) {
+    return outerNode;
+  }
+  const bridgeReverse = splitPolygon(bridge, hole);
+  const bridge2 = bridgeReverse.next;
+  indexSegment(bridge, bridge2.next);
+  filterPoints(bridgeReverse, bridgeReverse.next);
+  return filterPoints(bridge, bridge.next);
+}
+var K = 16;
+var blockBBox = new Float64Array(0);
+var numBlocks = 0;
+var blockHead = [];
+var blockStop = [];
+function buildBlockIndex(maxNodes, numHoles) {
+  const maxBlocks = Math.ceil((maxNodes + 2 * numHoles) / K) + numHoles + 2;
+  if (blockBBox.length < maxBlocks * 4) blockBBox = new Float64Array(maxBlocks * 4);
+  numBlocks = 0;
+}
+function indexSegment(head, stop) {
+  let p = head;
+  do {
+    const b = numBlocks++;
+    blockHead[b] = p;
+    let minX = p.x, minY = p.y, maxX = p.x, maxY = p.y;
+    let k = 0;
+    do {
+      const c = p.next;
+      p.z = b;
+      if (c.x < minX) minX = c.x;
+      if (c.x > maxX) maxX = c.x;
+      if (c.y < minY) minY = c.y;
+      if (c.y > maxY) maxY = c.y;
+      p = c;
+    } while (++k < K && p !== stop);
+    blockStop[b] = p;
+    const g = b * 4;
+    blockBBox[g] = minX;
+    blockBBox[g + 1] = minY;
+    blockBBox[g + 2] = maxX;
+    blockBBox[g + 3] = maxY;
+  } while (p !== stop);
+}
+function growBlock(head, tail) {
+  const g = head.z * 4;
+  if (tail.x < blockBBox[g]) blockBBox[g] = tail.x;
+  if (tail.y < blockBBox[g + 1]) blockBBox[g + 1] = tail.y;
+  if (tail.x > blockBBox[g + 2]) blockBBox[g + 2] = tail.x;
+  if (tail.y > blockBBox[g + 3]) blockBBox[g + 3] = tail.y;
+}
+function liveBlockStop(b) {
+  let stop = blockStop[b];
+  while (stop.prev.next !== stop) stop = stop.next;
+  blockStop[b] = stop;
+  return stop;
+}
+function liveBlockHead(b) {
+  let head = blockHead[b];
+  while (head.prev.next !== head) head = head.next;
+  blockHead[b] = head;
+  return head;
+}
+function findHoleBridge(hole, outerNode) {
+  let p = outerNode;
+  const hx = hole.x;
+  const hy = hole.y;
+  let qx = -Infinity;
+  let m;
+  if (equals(hole, p)) return p;
+  for (let b = 0, g = 0; b < numBlocks; b++, g += 4) {
+    if (hy < blockBBox[g + 1] || hy > blockBBox[g + 3] || blockBBox[g] > hx || blockBBox[g + 2] <= qx) continue;
+    const stop = liveBlockStop(b);
+    p = liveBlockHead(b);
+    do {
+      if (p.prev.next === p) {
+        if (equals(hole, p.next)) return p.next;
+        else if (hy <= p.y && hy >= p.next.y && p.next.y !== p.y) {
+          const x = p.x + (hy - p.y) * (p.next.x - p.x) / (p.next.y - p.y);
+          if (x <= hx && x > qx) {
+            qx = x;
+            m = p.x < p.next.x ? p : p.next;
+            if (x === hx) return m;
+          }
+        }
+      }
+      p = p.next;
+    } while (p !== stop);
+  }
+  if (!m) return null;
+  const mx = m.x;
+  const my = m.y;
+  const tminY = Math.min(hy, my);
+  const tmaxY = Math.max(hy, my);
+  let tanMin = Infinity;
+  for (let b = 0, g = 0; b < numBlocks; b++, g += 4) {
+    if (blockBBox[g + 2] < mx || blockBBox[g] > hx || blockBBox[g + 3] < tminY || blockBBox[g + 1] > tmaxY) continue;
+    const stop = liveBlockStop(b);
+    p = liveBlockHead(b);
+    do {
+      if (p.prev.next === p && hx >= p.x && p.x >= mx && hx !== p.x && // skip dead nodes
+      pointInTriangle(hy < my ? hx : qx, hy, mx, my, hy < my ? qx : hx, hy, p.x, p.y)) {
+        const tan = Math.abs(hy - p.y) / (hx - p.x);
+        if ((locallyInside(p, hole) || p.y === hy && p.next.y === hy && p.next.x > hx) && (tan < tanMin || tan === tanMin && (p.x > m.x || p.x === m.x && sectorContainsSector(m, p)))) {
+          m = p;
+          tanMin = tan;
+        }
+      }
+      p = p.next;
+    } while (p !== stop);
+  }
+  return m;
+}
+function sectorContainsSector(m, p) {
+  return area(m.prev, m, p.prev) < 0 && area(p.next, m, m.next) < 0;
+}
+var sortArr = [];
+var sortBuf = [];
+var zArr = new Uint32Array(0);
+var zBuf = new Uint32Array(0);
+var counts = new Uint32Array(256);
+function indexCurve(start, minX, minY, invSize) {
+  let p = start;
+  let n = 0;
+  do {
+    p.z = zOrder(p.x, p.y, minX, minY, invSize);
+    sortArr[n++] = p;
+    p = p.next;
+  } while (p !== start);
+  sortNodes(n);
+  let prev = null;
+  for (let i = 0; i < n; i++) {
+    const node = sortArr[i];
+    node.prevZ = prev;
+    if (prev) prev.nextZ = node;
+    prev = node;
+  }
+  prev.nextZ = null;
+  sortArr.fill(
+    /** @type {Node} */
+    /** @type {unknown} */
+    null,
+    0,
+    n
+  );
+  sortBuf.fill(
+    /** @type {Node} */
+    /** @type {unknown} */
+    null,
+    0,
+    n
+  );
+}
+function sortNodes(n) {
+  if (n <= 32) {
+    for (let i = 1; i < n; i++) {
+      const node = sortArr[i], z = node.z;
+      let j = i - 1;
+      while (j >= 0 && sortArr[j].z > z) {
+        sortArr[j + 1] = sortArr[j];
+        j--;
+      }
+      sortArr[j + 1] = node;
+    }
+    return;
+  }
+  if (zArr.length < n) {
+    zArr = new Uint32Array(n);
+    zBuf = new Uint32Array(n);
+    sortBuf = new Array(n);
+  }
+  for (let i = 0; i < n; i++) zArr[i] = sortArr[i].z;
+  radixPass(n, sortArr, zArr, sortBuf, zBuf, 0);
+  radixPass(n, sortBuf, zBuf, sortArr, zArr, 8);
+  radixPass(n, sortArr, zArr, sortBuf, zBuf, 16);
+  radixPass(n, sortBuf, zBuf, sortArr, zArr, 24);
+}
+function radixPass(n, src, srcZ, dst, dstZ, shift) {
+  counts.fill(0);
+  for (let i = 0; i < n; i++) counts[srcZ[i] >>> shift & 255]++;
+  let sum = 0;
+  for (let b = 0; b < 256; b++) {
+    const c = counts[b];
+    counts[b] = sum;
+    sum += c;
+  }
+  for (let i = 0; i < n; i++) {
+    const z = srcZ[i];
+    const pos = counts[z >>> shift & 255]++;
+    dst[pos] = src[i];
+    dstZ[pos] = z;
+  }
+}
+function zOrder(x, y, minX, minY, invSize) {
+  x = (x - minX) * invSize | 0;
+  y = (y - minY) * invSize | 0;
+  x = (x | x << 8) & 16711935;
+  x = (x | x << 4) & 252645135;
+  x = (x | x << 2) & 858993459;
+  x = (x | x << 1) & 1431655765;
+  y = (y | y << 8) & 16711935;
+  y = (y | y << 4) & 252645135;
+  y = (y | y << 2) & 858993459;
+  y = (y | y << 1) & 1431655765;
+  return x | y << 1;
+}
+function getLeftmost(start) {
+  let p = start, leftmost = start;
+  do {
+    if (p.x < leftmost.x || p.x === leftmost.x && p.y < leftmost.y) leftmost = p;
+    p = p.next;
+  } while (p !== start);
+  return leftmost;
+}
+function pointInTriangle(ax, ay, bx, by, cx, cy, px, py) {
+  return (cx - px) * (ay - py) >= (ax - px) * (cy - py) && (ax - px) * (by - py) >= (bx - px) * (ay - py) && (bx - px) * (cy - py) >= (cx - px) * (by - py);
+}
+function isValidDiagonal(a, b) {
+  const zeroLength = equals(a, b) && area(a.prev, a, a.next) > 0 && area(b.prev, b, b.next) > 0;
+  return a.next.i !== b.i && (zeroLength || locallyInside(a, b) && locallyInside(b, a) && // // locally visible
+  (area(a.prev, a, b.prev) !== 0 || area(a, b.prev, b) !== 0)) && // no opposite-facing sectors
+  !intersectsPolygon(a, b) && (zeroLength || middleInside(a, b));
+}
+function area(p, q, r) {
+  return (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
+}
+function equals(p1, p2) {
+  return p1.x === p2.x && p1.y === p2.y;
+}
+function intersects2(p1, q1, p2, q2, includeBoundary = true) {
+  const o1 = area(p1, q1, p2);
+  const o2 = area(p1, q1, q2);
+  const o3 = area(p2, q2, p1);
+  const o4 = area(p2, q2, q1);
+  if ((o1 > 0 && o2 < 0 || o1 < 0 && o2 > 0) && (o3 > 0 && o4 < 0 || o3 < 0 && o4 > 0)) return true;
+  if (!includeBoundary) return false;
+  if (o1 === 0 && onSegment(p1, p2, q1)) return true;
+  if (o2 === 0 && onSegment(p1, q2, q1)) return true;
+  if (o3 === 0 && onSegment(p2, p1, q2)) return true;
+  if (o4 === 0 && onSegment(p2, q1, q2)) return true;
+  return false;
+}
+function onSegment(p, q, r) {
+  return q.x <= Math.max(p.x, r.x) && q.x >= Math.min(p.x, r.x) && q.y <= Math.max(p.y, r.y) && q.y >= Math.min(p.y, r.y);
+}
+function intersectsPolygon(a, b) {
+  const minX = Math.min(a.x, b.x);
+  const maxX = Math.max(a.x, b.x);
+  const minY = Math.min(a.y, b.y);
+  const maxY = Math.max(a.y, b.y);
+  let p = a;
+  do {
+    const n = p.next;
+    if (p.x > maxX && n.x > maxX || p.x < minX && n.x < minX || p.y > maxY && n.y > maxY || p.y < minY && n.y < minY) {
+      p = n;
+      continue;
+    }
+    if (p.i !== a.i && n.i !== a.i && p.i !== b.i && n.i !== b.i && intersects2(p, n, a, b)) return true;
+    p = n;
+  } while (p !== a);
+  return false;
+}
+function locallyInside(a, b) {
+  return area(a.prev, a, a.next) < 0 ? area(a, b, a.next) >= 0 && area(a, a.prev, b) >= 0 : area(a, b, a.prev) < 0 || area(a, a.next, b) < 0;
+}
+function middleInside(a, b) {
+  let p = a;
+  let inside = false;
+  const px = (a.x + b.x) / 2;
+  const py = (a.y + b.y) / 2;
+  do {
+    const n = p.next;
+    if (p.y > py !== n.y > py && px < (n.x - p.x) * (py - p.y) / (n.y - p.y) + p.x)
+      inside = !inside;
+    p = n;
+  } while (p !== a);
+  return inside;
+}
+function splitPolygon(a, b) {
+  const a2 = createNode(a.i, a.x, a.y), b2 = createNode(b.i, b.x, b.y), an = a.next, bp = b.prev;
+  a.next = b;
+  b.prev = a;
+  a2.next = an;
+  an.prev = a2;
+  b2.next = a2;
+  a2.prev = b2;
+  bp.next = b2;
+  b2.prev = bp;
+  return b2;
+}
+function insertNode(i, x, y, last) {
+  const p = createNode(i, x, y);
+  if (!last) {
+    p.prev = p;
+    p.next = p;
+  } else {
+    p.next = last.next;
+    p.prev = last;
+    last.next.prev = p;
+    last.next = p;
+  }
+  return p;
+}
+function removeNode(p) {
+  p.next.prev = p.prev;
+  p.prev.next = p.next;
+  if (p.prevZ) p.prevZ.nextZ = p.nextZ;
+  if (p.nextZ) p.nextZ.prevZ = p.prevZ;
+  if (indexActive) growBlock(p.prev, p.next);
+}
+function createNode(i, x, y) {
+  return (
+    /** @type {Node} */
+    /** @type {unknown} */
+    {
+      i,
+      // vertex index in coordinates array
+      x,
+      y,
+      // vertex coordinates
+      prev: null,
+      // previous and next vertex nodes in a polygon ring
+      next: null,
+      z: 0,
+      // z-order curve value; doubles as owning block in the hole-bridge index during eliminateHoles
+      prevZ: null,
+      // previous and next nodes in z-order
+      nextZ: null
+    }
+  );
+}
+function signedArea2(data, start, end, dim) {
+  let sum = 0;
+  for (let i = start, j = end - dim; i < end; i += dim) {
+    sum += (data[j] - data[i]) * (data[i + 1] + data[j + 1]);
+    j = i;
+  }
+  return sum;
+}
+
+// src/mvt/triangulate.ts
+function ringArea(ring) {
+  let sum = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    sum += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+  }
+  return sum / 2;
+}
+function groupPolygonRings(rings) {
+  const polygons = [];
+  for (const ring of rings) {
+    if (ring.length < 3) continue;
+    const area2 = ringArea(ring);
+    if (Math.abs(area2) < 1e-9) continue;
+    if (area2 > 0 || polygons.length === 0) polygons.push([ring]);
+    else polygons[polygons.length - 1].push(ring);
+  }
+  return polygons;
+}
+function triangulatePolygons(features, screenScale) {
+  const positions = [];
+  const indices = [];
+  for (const feature of features) {
+    if (feature.type !== "polygon") continue;
+    const bounds = featureBounds2(feature);
+    if (!bounds) continue;
+    const screenWidth = (bounds[2] - bounds[0]) * screenScale;
+    const screenHeight = (bounds[3] - bounds[1]) * screenScale;
+    if (screenWidth * screenHeight < 2) continue;
+    for (const polygon of groupPolygonRings(feature.paths)) {
+      const flat = [];
+      const holes = [];
+      for (let ring = 0; ring < polygon.length; ring += 1) {
+        if (ring > 0) holes.push(flat.length / 2);
+        for (const [x, y] of polygon[ring]) flat.push(x, y);
+      }
+      if (flat.length < 6) continue;
+      const triangles = earcut(flat, holes, 2);
+      if (triangles.length === 0) continue;
+      const base = positions.length / 2;
+      for (const value of flat) positions.push(value);
+      for (const index of triangles) indices.push(index + base);
+    }
+  }
+  if (indices.length === 0) return null;
+  return { positions: new Float32Array(positions), indices: new Uint32Array(indices) };
+}
+function lineSegments(features) {
+  const vertices = [];
+  for (const feature of features) {
+    if (feature.type !== "line") continue;
+    for (const path of feature.paths) {
+      for (let i = 1; i < path.length; i += 1) {
+        const a = path[i - 1];
+        const b = path[i];
+        vertices.push(a[0], a[1], b[0], b[1]);
+      }
+    }
+  }
+  return vertices.length === 0 ? null : new Float32Array(vertices);
+}
+function featureBounds2(feature) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const path of feature.paths) {
+    for (const [x, y] of path) {
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (!Number.isFinite(minX)) return null;
+  return [minX, minY, maxX, maxY];
+}
+
+// src/renderers/mvt-webgl-renderer.ts
+var VERTEX_SHADER = `#version 300 es
+in vec2 a_pos;
+uniform vec2 u_offset;
+uniform float u_scale;
+uniform vec2 u_resolution;
+void main() {
+  vec2 p = a_pos * u_scale + u_offset;
+  vec2 clip = vec2(p.x / u_resolution.x * 2.0 - 1.0, 1.0 - p.y / u_resolution.y * 2.0);
+  gl_Position = vec4(clip, 0.0, 1.0);
+}`;
+var FRAGMENT_SHADER = `#version 300 es
+precision mediump float;
+uniform vec4 u_color;
+out vec4 outColor;
+void main() {
+  outColor = u_color;
+}`;
+var PALETTE2 = [
+  [76, 125, 255, 255],
+  [232, 89, 12, 255],
+  [242, 183, 5, 255],
+  [47, 158, 68, 255],
+  [156, 54, 181, 255],
+  [12, 133, 153, 255]
+];
+function supportsWebGL2() {
+  if (typeof document === "undefined") return false;
+  try {
+    const canvas = document.createElement("canvas");
+    return canvas.getContext("webgl2") !== null;
+  } catch {
+    return false;
+  }
+}
+var MvtWebGLRenderer = class {
+  constructor(options) {
+    __publicField(this, "options", options);
+    __publicField(this, "mode", "mvt");
+    __publicField(this, "overlay");
+    __publicField(this, "decoded");
+    __publicField(this, "meshes");
+    __publicField(this, "gpu", /* @__PURE__ */ new Map());
+    __publicField(this, "canvas", null);
+    __publicField(this, "gl", null);
+    __publicField(this, "program", null);
+    __publicField(this, "uniforms", { offset: null, scale: null, resolution: null, color: null });
+    __publicField(this, "controller", null);
+    __publicField(this, "generation", 0);
+    __publicField(this, "attached", false);
+    __publicField(this, "loading", false);
+    __publicField(this, "opacity");
+    __publicField(this, "lastView", null);
+    this.opacity = options.opacity;
+    this.decoded = new LRU(64);
+    this.meshes = new LRU(48);
+    this.overlay = new GlCanvasOverlay(options.google, options.map);
+  }
+  attach() {
+    if (this.attached) return;
+    this.attached = true;
+    this.overlay.setMap(this.options.map);
+  }
+  detach() {
+    if (!this.attached) return;
+    this.attached = false;
+    this.generation += 1;
+    this.controller?.abort();
+    this.controller = null;
+    this.overlay.setMap(null);
+    this.canvas = null;
+    this.gl = null;
+    this.program = null;
+    this.gpu.clear();
+  }
+  update(view) {
+    this.lastView = view;
+    void this.render(view);
+  }
+  prefetch(view) {
+    void this.render(view);
+  }
+  setOpacity(opacity) {
+    this.opacity = opacity;
+    if (this.lastView) void this.render(this.lastView);
+  }
+  refresh() {
+    this.decoded.clear();
+    this.meshes.clear();
+    this.gpu.clear();
+    if (this.lastView) void this.render(this.lastView);
+  }
+  destroy() {
+    this.generation += 1;
+    this.controller?.abort();
+    this.overlay.destroy();
+    this.decoded.clear();
+    this.meshes.clear();
+    this.gpu.clear();
+    this.attached = false;
+    this.lastView = null;
+  }
+  setLoading(loading) {
+    if (this.loading === loading) return;
+    this.loading = loading;
+    this.options.onLoading(loading);
+  }
+  async render(view) {
+    if (!this.attached) return;
+    const { service } = this.options;
+    const padding = Math.min(this.options.padding, 0.15);
+    const plan = planTiles(view, service.minZoom, service.maxZoom, padding);
+    const generation = ++this.generation;
+    this.controller?.abort();
+    const controller = new AbortController();
+    this.controller = controller;
+    this.setLoading(true);
+    try {
+      const tiles = plan.tiles;
+      const decoded = await Promise.all(
+        tiles.map((tile) => this.loadTile(tile, controller.signal))
+      );
+      if (generation !== this.generation) return;
+      let total = 0;
+      for (const tile of decoded) {
+        for (const layer of tile?.layers ?? []) total += layer.features.length;
+      }
+      if (total > this.options.layer.maxFeatures) {
+        this.clearCanvas(plan, view);
+        return;
+      }
+      for (let index = 0; index < tiles.length; index += 1) {
+        if (generation !== this.generation) return;
+        const tile = tiles[index];
+        if (decoded[index]) {
+          this.ensureMeshes(tile, decoded[index], plan);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      }
+      if (generation !== this.generation) return;
+      this.draw(plan, view, tiles);
+    } catch (error) {
+      if (!isAbortError(error)) {
+        this.options.onError(error instanceof Error ? error : new Error(String(error)));
+      }
+    } finally {
+      if (generation === this.generation) this.setLoading(false);
+    }
+  }
+  async loadTile(tile, signal) {
+    const key = `${tile.z}/${tile.x}/${tile.y}`;
+    const cached = this.decoded.get(key);
+    if (cached) return cached;
+    const path = this.options.service.tileTemplate.replace("{z}", String(tile.z)).replace("{y}", String(tile.y)).replace("{x}", String(tile.x));
+    const url = `${this.options.service.url}/${path}`;
+    try {
+      const response = await this.options.http.request(url, {}, { signal });
+      const buffer = await response.arrayBuffer();
+      const decoded = decodeMvt(buffer);
+      this.decoded.set(key, decoded);
+      return decoded;
+    } catch (error) {
+      if (error instanceof NullIslandHttpError && (error.status === 404 || error.status === 400)) {
+        const empty = { layers: [] };
+        this.decoded.set(key, empty);
+        return empty;
+      }
+      throw error;
+    }
+  }
+  ensureMeshes(tile, data, plan) {
+    const key = `${tile.z}/${tile.x}/${tile.y}`;
+    const cached = this.meshes.get(key);
+    if (cached) return cached;
+    const { service } = this.options;
+    const set = { extent: service.extent, fills: /* @__PURE__ */ new Map(), lines: /* @__PURE__ */ new Map() };
+    const styled = service.styleLayers.length > 0 ? new Set(service.styleLayers.map((style) => style.sourceLayer)) : null;
+    const wantsLines = service.styleLayers.some((style) => style.type === "line");
+    for (const layer of data.layers) {
+      if (styled && !styled.has(layer.name)) continue;
+      const extent = layer.extent || service.extent;
+      const screenScale = plan.tilePx / extent;
+      set.fills.set(layer.name, triangulatePolygons(layer.features, screenScale));
+      if (wantsLines) set.lines.set(layer.name, lineSegments(layer.features));
+    }
+    this.meshes.set(key, set);
+    return set;
+  }
+  ensureGl(canvas) {
+    if (this.gl && this.canvas === canvas) return this.gl;
+    const gl = canvas.getContext("webgl2", { alpha: true, antialias: true, premultipliedAlpha: false });
+    if (!gl) return null;
+    const program = createProgram(gl, VERTEX_SHADER, FRAGMENT_SHADER);
+    if (!program) return null;
+    this.canvas = canvas;
+    this.gl = gl;
+    this.program = program;
+    this.gpu.clear();
+    this.uniforms = {
+      offset: gl.getUniformLocation(program, "u_offset"),
+      scale: gl.getUniformLocation(program, "u_scale"),
+      resolution: gl.getUniformLocation(program, "u_resolution"),
+      color: gl.getUniformLocation(program, "u_color")
+    };
+    return gl;
+  }
+  draw(plan, view, tiles) {
+    const canvas = this.overlay.getCanvas();
+    if (!canvas) return;
+    const gl = this.ensureGl(canvas);
+    if (!gl || !this.program) return;
+    const { padding, service } = this.options;
+    const dpr = Math.min(view.dpr, 2);
+    const cssWidth = Math.max(1, Math.round(view.width * (1 + padding * 2)));
+    const cssHeight = Math.max(1, Math.round(view.height * (1 + padding * 2)));
+    const maxPixels = 6e6;
+    const scale = Math.min(1, Math.sqrt(maxPixels / (cssWidth * dpr * cssHeight * dpr)));
+    const deviceWidth = Math.max(1, Math.round(cssWidth * dpr * scale));
+    const deviceHeight = Math.max(1, Math.round(cssHeight * dpr * scale));
+    if (canvas.width !== deviceWidth || canvas.height !== deviceHeight) {
+      canvas.width = deviceWidth;
+      canvas.height = deviceHeight;
+    }
+    canvas.style.width = `${cssWidth}px`;
+    canvas.style.height = `${cssHeight}px`;
+    gl.viewport(0, 0, deviceWidth, deviceHeight);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.useProgram(this.program);
+    const position = gl.getAttribLocation(this.program, "a_pos");
+    gl.enableVertexAttribArray(position);
+    gl.uniform2f(this.uniforms.resolution, cssWidth, cssHeight);
+    const styles = service.styleLayers.length > 0 ? service.styleLayers : this.fallbackStyles(tiles);
+    const fillOrLine = (style) => style.type === "fill" && style.fillColor !== void 0 || style.type === "line" && style.lineColor !== void 0;
+    for (const style of styles) {
+      if (!fillOrLine(style)) continue;
+      if (!styleVisible2(style, view.zoom)) continue;
+      const isLine = style.type === "line";
+      const rgba = parseCssColor(
+        isLine ? style.lineColor ?? "#4c7dff" : style.fillColor ?? "rgba(76,125,255,0.45)"
+      );
+      const alpha = this.opacity * (isLine ? style.lineOpacity ?? 1 : style.fillOpacity ?? 1);
+      gl.uniform4f(this.uniforms.color, rgba[0], rgba[1], rgba[2], rgba[3] * alpha);
+      for (const tile of tiles) {
+        const key = `${tile.z}/${tile.x}/${tile.y}`;
+        const set = this.meshes.get(key);
+        if (!set) continue;
+        const scalePerUnit = plan.tilePx / set.extent;
+        gl.uniform2f(
+          this.uniforms.offset,
+          tile.x * plan.tilePx - plan.originX,
+          tile.y * plan.tilePx - plan.originY
+        );
+        gl.uniform1f(this.uniforms.scale, scalePerUnit);
+        if (isLine) {
+          const lines = set.lines.get(style.sourceLayer);
+          if (!lines) continue;
+          const gpu = this.getGpuMesh(key, style.sourceLayer, "line", lines, null);
+          if (!gpu) continue;
+          gl.bindBuffer(gl.ARRAY_BUFFER, gpu.vbo);
+          gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+          gl.drawArrays(gl.LINES, 0, gpu.count);
+        } else {
+          const mesh = set.fills.get(style.sourceLayer);
+          if (!mesh) continue;
+          const gpu = this.getGpuMesh(key, style.sourceLayer, "fill", mesh.positions, mesh.indices);
+          if (!gpu || !gpu.ibo) continue;
+          gl.bindBuffer(gl.ARRAY_BUFFER, gpu.vbo);
+          gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, gpu.ibo);
+          gl.drawElements(gl.TRIANGLES, gpu.count, gl.UNSIGNED_INT, 0);
+        }
+      }
+    }
+    this.overlay.setBounds(plan.bbox);
+  }
+  getGpuMesh(tileKey, layer, kind, positions, indices) {
+    const gl = this.gl;
+    if (!gl) return null;
+    const key = `${tileKey}|${layer}|${kind}`;
+    const cached = this.gpu.get(key);
+    if (cached) return cached;
+    const vbo = gl.createBuffer();
+    if (!vbo) return null;
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+    let ibo = null;
+    let count = positions.length / 2;
+    if (indices) {
+      ibo = gl.createBuffer();
+      if (!ibo) {
+        gl.deleteBuffer(vbo);
+        return null;
+      }
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+      count = indices.length;
+    }
+    const mesh = { vbo, ibo, count };
+    this.gpu.set(key, mesh);
+    if (this.gpu.size > 256) {
+      const oldest = this.gpu.keys().next();
+      if (!oldest.done) {
+        const evicted = this.gpu.get(oldest.value);
+        if (evicted) {
+          gl.deleteBuffer(evicted.vbo);
+          if (evicted.ibo) gl.deleteBuffer(evicted.ibo);
+        }
+        this.gpu.delete(oldest.value);
+      }
+    }
+    return mesh;
+  }
+  fallbackStyles(tiles) {
+    const names = /* @__PURE__ */ new Set();
+    for (const tile of tiles) {
+      const set = this.meshes.get(`${tile.z}/${tile.x}/${tile.y}`);
+      for (const name of set?.fills.keys() ?? []) names.add(name);
+    }
+    return [...names].map((name, index) => {
+      const [r, g, b] = PALETTE2[index % PALETTE2.length];
+      return {
+        id: name,
+        sourceLayer: name,
+        type: "fill",
+        fillColor: `rgb(${r}, ${g}, ${b})`,
+        fillOpacity: 0.45,
+        lineColor: `rgb(${r}, ${g}, ${b})`,
+        lineWidth: 1,
+        lineOpacity: 0.9,
+        minZoom: void 0,
+        maxZoom: void 0
+      };
+    });
+  }
+  clearCanvas(plan, view) {
+    const canvas = this.overlay.getCanvas();
+    if (!canvas) return;
+    canvas.width = 1;
+    canvas.height = 1;
+    canvas.style.width = `${Math.round(view.width)}px`;
+    canvas.style.height = `${Math.round(view.height)}px`;
+    this.overlay.setBounds(plan.bbox);
+  }
+};
+function createProgram(gl, vertexSource, fragmentSource) {
+  const compile = (type, source) => {
+    const shader = gl.createShader(type);
+    if (!shader) return null;
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      gl.deleteShader(shader);
+      return null;
+    }
+    return shader;
+  };
+  const vertex = compile(gl.VERTEX_SHADER, vertexSource);
+  const fragment = compile(gl.FRAGMENT_SHADER, fragmentSource);
+  if (!vertex || !fragment) return null;
+  const program = gl.createProgram();
+  if (!program) return null;
+  gl.attachShader(program, vertex);
+  gl.attachShader(program, fragment);
+  gl.linkProgram(program);
+  gl.deleteShader(vertex);
+  gl.deleteShader(fragment);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    gl.deleteProgram(program);
+    return null;
+  }
+  return program;
+}
+function parseCssColor(value) {
+  const text = value.trim();
+  if (text.startsWith("#")) {
+    const hex = text.slice(1);
+    if (hex.length === 3 || hex.length === 4) {
+      const [r, g, b, a = "f"] = hex.split("");
+      return [
+        Number.parseInt(r + r, 16) / 255,
+        Number.parseInt(g + g, 16) / 255,
+        Number.parseInt(b + b, 16) / 255,
+        Number.parseInt(a + a, 16) / 255
+      ];
+    }
+    if (hex.length === 6 || hex.length === 8) {
+      return [
+        Number.parseInt(hex.slice(0, 2), 16) / 255,
+        Number.parseInt(hex.slice(2, 4), 16) / 255,
+        Number.parseInt(hex.slice(4, 6), 16) / 255,
+        hex.length === 8 ? Number.parseInt(hex.slice(6, 8), 16) / 255 : 1
+      ];
+    }
+  }
+  const match = /^rgba?\(([^)]+)\)$/i.exec(text);
+  if (match) {
+    const parts = match[1].split(",").map((part) => Number.parseFloat(part.trim()));
+    const [r = 0, g = 0, b = 0, a = 1] = parts;
+    return [r / 255, g / 255, b / 255, a];
+  }
+  return [0.3, 0.5, 1, 0.45];
+}
+function styleVisible2(style, zoom) {
+  if (style.minZoom !== void 0 && zoom < style.minZoom) return false;
+  if (style.maxZoom !== void 0 && zoom > style.maxZoom) return false;
+  return true;
+}
+var GlCanvasOverlay = class {
+  constructor(googleApi, map) {
+    __publicField(this, "overlay");
+    __publicField(this, "container", null);
+    __publicField(this, "canvas", null);
+    __publicField(this, "bounds", null);
+    const overlay = new googleApi.maps.OverlayView();
+    overlay.onAdd = () => this.onAdd();
+    overlay.draw = () => this.position();
+    overlay.onRemove = () => this.onRemove();
+    this.overlay = overlay;
+    this.overlay.setMap(map);
+  }
+  setMap(map) {
+    this.overlay.setMap(map);
+  }
+  getCanvas() {
+    return this.canvas;
+  }
+  setBounds(bounds) {
+    this.bounds = bounds;
+    this.position();
+  }
+  destroy() {
+    this.overlay.setMap(null);
+    this.onRemove();
+  }
+  onAdd() {
+    const panes = this.overlay.getPanes();
+    if (!panes) return;
+    this.container?.remove();
+    const container = document.createElement("div");
+    container.style.position = "absolute";
+    container.style.left = "0";
+    container.style.top = "0";
+    container.style.pointerEvents = "none";
+    const canvas = document.createElement("canvas");
+    canvas.style.position = "absolute";
+    canvas.style.left = "0";
+    canvas.style.top = "0";
+    canvas.style.pointerEvents = "none";
+    container.appendChild(canvas);
+    panes.overlayLayer.appendChild(container);
+    this.container = container;
+    this.canvas = canvas;
+    this.position();
+  }
+  onRemove() {
+    this.container?.remove();
+    this.container = null;
+    this.canvas = null;
+  }
+  position() {
+    if (!this.container || !this.canvas || !this.bounds) return;
+    const projection = this.overlay.getProjection();
+    if (!projection) return;
+    const [west, south, east, north] = this.bounds;
+    const northWest = projection.fromLatLngToDivPixel({ lat: north, lng: west });
+    const southEast = projection.fromLatLngToDivPixel({ lat: south, lng: east });
+    if (!northWest || !southEast) return;
+    const width = Math.max(0, southEast.x - northWest.x);
+    const height = Math.max(0, southEast.y - northWest.y);
+    this.container.style.left = `${northWest.x}px`;
+    this.container.style.top = `${northWest.y}px`;
+    this.container.style.width = `${width}px`;
+    this.container.style.height = `${height}px`;
+    this.canvas.style.width = `${width}px`;
+    this.canvas.style.height = `${height}px`;
+  }
+};
+
 // src/layer.ts
 var LayerController = class {
   constructor(config, context) {
@@ -2820,7 +3922,8 @@ var LayerController = class {
       this.layerTitle = this.config.title ?? vectorTiles.title;
       this.minZoom = this.config.minZoom ?? vectorTiles.minZoom;
       this.maxZoom = this.config.maxZoom ?? vectorTiles.maxZoom;
-      this.renderer = new MvtRenderer({
+      const useWebGL = this.config.renderer !== "canvas" && (this.config.renderer === "webgl" || supportsWebGL2());
+      const mvtOptions = {
         map: this.context.map,
         google: this.context.google,
         http: this.context.http,
@@ -2830,7 +3933,8 @@ var LayerController = class {
         padding: this.context.padding,
         onLoading: (loading) => this.context.onLoading(this.id, loading),
         onError: (error) => this.context.onError(error)
-      });
+      };
+      this.renderer = useWebGL ? new MvtWebGLRenderer(mvtOptions) : new MvtRenderer(mvtOptions);
       this.state = "ready";
       if (this.isVisible && this.currentView) this.sync(this.currentView);
       return;

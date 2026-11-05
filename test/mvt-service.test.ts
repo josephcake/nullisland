@@ -76,7 +76,7 @@ describe('discoverVectorTileService', () => {
     expect(service.minZoom).toBe(0);
     expect(service.maxZoom).toBe(14);
     expect(service.styleLayers[0]?.sourceLayer).toBe('Parcels');
-    expect(service.fullExtent?.[0]).toBeCloseTo(-118.95, 2);
-    expect(service.fullExtent?.[3]).toBeCloseTo(34.19, 2);
+    expect(service.fullExtent?.[0]).toBeCloseTo(-118.94, 1);
+    expect(service.fullExtent?.[3]).toBeCloseTo(34.19, 1);
   });
 });

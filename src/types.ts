@@ -55,6 +55,8 @@ export interface ArcGisLayerConfig {
   sublayers?: number[];
   /** Style document for a VectorTileServer. Defaults to its `resources/styles/root.json`. */
   styleUrl?: string;
+  /** Painter for MVT sources. `auto` uses WebGL when available. */
+  renderer?: 'auto' | 'webgl' | 'canvas';
   /** Hard cap on features fetched per viewport. Defaults to 20 000. */
   maxFeatures?: number;
   /** Hard cap on pages fetched per viewport. Defaults to 10. */

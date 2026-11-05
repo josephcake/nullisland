@@ -11,5 +11,6 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   target: 'es2020',
+  noExternal: ['earcut'],
   outExtension: ({format}) => ({js: format === 'cjs' ? '.cjs' : '.js'}),
 });

@@ -32,6 +32,7 @@ export interface NormalizedLayerConfig {
   mode: LayerMode;
   sublayers: number[] | undefined;
   styleUrl: string | undefined;
+  renderer: 'auto' | 'webgl' | 'canvas';
   maxFeatures: number;
   maxPages: number;
 }
@@ -169,6 +170,7 @@ export function normalizeLayer(
     mode,
     sublayers,
     styleUrl: config.styleUrl,
+    renderer: config.renderer ?? 'auto',
     maxFeatures,
     maxPages,
   };
