@@ -54,6 +54,7 @@ requires an API key, so the page asks for one at runtime — nothing is committe
 layer itself needs no token.
 
 ```bash
+npm run build:demo   # bundle src/ into demo/nullisland.js
 npx serve demo
 ```
 

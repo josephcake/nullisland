@@ -38,4 +38,5 @@ three of its sublayers:
 ## Hosting
 
 Any static host works. For GitHub Pages: Settings → Pages → Source: **GitHub Actions**, then deploy
-the `demo/` folder. The page imports the published package from jsDelivr, so there is no build step.
+the `demo/` folder. The page imports `demo/nullisland.js`, a browser bundle of `src/` produced by `npm run build:demo`.
+Rebuild it after changing the library.

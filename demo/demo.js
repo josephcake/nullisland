@@ -9,10 +9,8 @@
 const SERVICE =
   'https://services9.arcgis.com/RHVPKKiFTONKtxq3/arcgis/rest/services/NWS_Watches_Warnings_v1/FeatureServer';
 
-// Pinned for reproducible demos; bump after publishing a new version.
-const VERSION = '0.1.0';
-const LIBRARY = `https://cdn.jsdelivr.net/npm/@offthemap/nullisland@${VERSION}/dist/index.js`;
-const FALLBACK = `https://esm.sh/@offthemap/nullisland@${VERSION}`;
+// Bundled from src/ by `npm run build:demo`, so the demo needs no CDN.
+const LIBRARY = './nullisland.js';
 
 const STORAGE_KEY = 'nullisland.demo.key';
 
@@ -56,18 +54,14 @@ window.fetch = (...args) => {
 };
 
 async function loadLibrary() {
-  let lastError;
-  for (const url of [LIBRARY, FALLBACK]) {
-    try {
-      const module = await import(url);
-      log(`library loaded from ${url.includes('jsdelivr') ? 'jsDelivr' : 'esm.sh'}`);
-      return module.NullIsland;
-    } catch (error) {
-      lastError = error;
-      log(`import failed (${url.includes('jsdelivr') ? 'jsDelivr' : 'esm.sh'}): ${error.message}`);
-    }
+  try {
+    const module = await import(LIBRARY);
+    log('library loaded (local bundle)');
+    return module.NullIsland;
+  } catch (error) {
+    log(`import failed: ${error.message}`);
+    throw error;
   }
-  throw lastError;
 }
 
 function setStatus(message, kind = 'info') {
