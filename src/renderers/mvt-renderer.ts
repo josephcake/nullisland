@@ -120,6 +120,8 @@ export class MvtRenderer implements LayerRenderer {
   }
 
   private async render(view: Viewport): Promise<void> {
+    if (!this.attached) return;
+
     const {service, padding} = this.options;
     const bbox = padBBox(view.bounds4326, padding);
 
@@ -378,6 +380,9 @@ class MvtCanvasOverlay {
   private onAdd(): void {
     const panes = this.overlay.getPanes();
     if (!panes) return;
+
+    // A re-add without onRemove would otherwise stack canvases.
+    this.container?.remove();
 
     const container = document.createElement('div');
     container.style.position = 'absolute';

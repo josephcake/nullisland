@@ -173,7 +173,11 @@ export class LayerController implements NullIslandLayer {
       this.renderer?.detach();
       return;
     }
-    if (this.currentView) this.sync(this.currentView);
+    try {
+      if (this.currentView) this.sync(this.currentView);
+    } catch (error) {
+      this.context.onError(error instanceof Error ? error : new Error(String(error)));
+    }
   }
 
   setOpacity(opacity: number): void {

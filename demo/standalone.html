@@ -2688,6 +2688,7 @@ var MvtRenderer = class {
     this.options.onLoading(loading);
   }
   async render(view) {
+    if (!this.attached) return;
     const { service, padding } = this.options;
     const bbox = padBBox(view.bounds4326, padding);
     if (this.lastBbox && view.zoom === this.lastZoom && bboxContains(this.lastBbox, view.bounds4326)) {
@@ -2882,6 +2883,7 @@ var MvtCanvasOverlay = class {
   onAdd() {
     const panes = this.overlay.getPanes();
     if (!panes) return;
+    this.container?.remove();
     const container = document.createElement("div");
     container.style.position = "absolute";
     container.style.left = "0";
@@ -3042,7 +3044,11 @@ var LayerController = class {
       this.renderer?.detach();
       return;
     }
-    if (this.currentView) this.sync(this.currentView);
+    try {
+      if (this.currentView) this.sync(this.currentView);
+    } catch (error) {
+      this.context.onError(error instanceof Error ? error : new Error(String(error)));
+    }
   }
   setOpacity(opacity) {
     this.config.opacity = Math.min(1, Math.max(0, opacity));
