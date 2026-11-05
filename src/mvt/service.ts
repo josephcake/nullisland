@@ -8,6 +8,7 @@
 
 import type {ServiceUrl} from '../config.ts';
 import type {HttpClient} from '../http.ts';
+import {metersToBbox, type BBox} from '../util/mercator.ts';
 
 export interface MvtStyleLayer {
   id: string;
@@ -30,6 +31,8 @@ export interface VectorTileService {
   extent: number;
   minZoom: number;
   maxZoom: number;
+  /** Geographic coverage of the cache; tiles outside it do not exist. */
+  fullExtent: BBox | undefined;
   styleLayers: MvtStyleLayer[];
   styleUrl: string;
 }
@@ -41,6 +44,13 @@ interface VectorTileMetadata {
     rows?: number;
     cols?: number;
     lods?: Array<{level?: number; resolution?: number}>;
+  };
+  fullExtent?: {
+    xmin?: number;
+    ymin?: number;
+    xmax?: number;
+    ymax?: number;
+    spatialReference?: {wkid?: number; latestWkid?: number};
   };
 }
 
@@ -78,6 +88,7 @@ export async function discoverVectorTileService(
     extent: 4096,
     minZoom,
     maxZoom,
+    fullExtent: parseExtent(metadata.fullExtent),
     styleLayers,
     styleUrl,
   };
@@ -113,6 +124,15 @@ export function parseStyleLayers(style: MapboxStyle): MvtStyleLayer[] {
   }
 
   return result;
+}
+
+function parseExtent(extent: VectorTileMetadata['fullExtent']): BBox | undefined {
+  if (!extent) return undefined;
+  const {xmin, ymin, xmax, ymax} = extent;
+  if (![xmin, ymin, xmax, ymax].every((value) => typeof value === 'number')) return undefined;
+  const wkid = extent.spatialReference?.latestWkid ?? extent.spatialReference?.wkid;
+  if (wkid === 4326) return [xmin!, ymin!, xmax!, ymax!];
+  return metersToBbox([xmin!, ymin!, xmax!, ymax!]);
 }
 
 function color(value: unknown): string | undefined {

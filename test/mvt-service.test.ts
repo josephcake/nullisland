@@ -61,6 +61,13 @@ describe('discoverVectorTileService', () => {
               name: 'Parcels',
               tiles: ['tile/{z}/{y}/{x}.pbf'],
               tileInfo: {lods: [{level: 0}, {level: 14}]},
+              fullExtent: {
+                xmin: -13240863.776,
+                ymin: 4023715.14,
+                xmax: -13173870.3567,
+                ymax: 4054853.8936,
+                spatialReference: {latestWkid: 3857},
+              },
             },
     } as unknown as HttpClient;
 
@@ -69,5 +76,7 @@ describe('discoverVectorTileService', () => {
     expect(service.minZoom).toBe(0);
     expect(service.maxZoom).toBe(14);
     expect(service.styleLayers[0]?.sourceLayer).toBe('Parcels');
+    expect(service.fullExtent?.[0]).toBeCloseTo(-118.95, 2);
+    expect(service.fullExtent?.[3]).toBeCloseTo(34.19, 2);
   });
 });

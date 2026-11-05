@@ -580,62 +580,6 @@ async function mapLimit(items, limit, mapper) {
   return results;
 }
 
-// src/mvt/service.ts
-async function discoverVectorTileService(service, http, options = {}) {
-  const metadata = await http.json(service.base, { f: "json" });
-  const levels = (metadata.tileInfo?.lods ?? []).map((lod) => Number(lod.level)).filter((level) => Number.isFinite(level));
-  const minZoom = levels.length > 0 ? Math.min(...levels) : 0;
-  const maxZoom = levels.length > 0 ? Math.max(...levels) : 19;
-  const tileTemplate = metadata.tiles?.[0] ?? "tile/{z}/{y}/{x}.pbf";
-  const styleUrl = options.styleUrl ?? `${service.base}/resources/styles/root.json`;
-  let styleLayers = [];
-  try {
-    styleLayers = parseStyleLayers(await http.json(styleUrl));
-  } catch {
-  }
-  return {
-    url: service.base,
-    title: options.title ?? metadata.name ?? service.base,
-    tileTemplate,
-    tileSize: 512,
-    extent: 4096,
-    minZoom,
-    maxZoom,
-    styleLayers,
-    styleUrl
-  };
-}
-function parseStyleLayers(style) {
-  const result = [];
-  for (const layer of style.layers ?? []) {
-    const type = layer.type === "fill" ? "fill" : layer.type === "line" ? "line" : null;
-    if (!type) continue;
-    const paint = layer.paint ?? {};
-    const sourceLayer = typeof layer["source-layer"] === "string" ? layer["source-layer"] : String(layer.id ?? "");
-    if (!sourceLayer) continue;
-    result.push({
-      id: String(layer.id ?? sourceLayer),
-      sourceLayer,
-      type,
-      fillColor: color(paint["fill-color"]),
-      fillOpacity: number(paint["fill-opacity"]),
-      // Fill layers carry their border in fill-outline-*.
-      lineColor: color(type === "fill" ? paint["fill-outline-color"] : paint["line-color"]),
-      lineWidth: number(type === "fill" ? paint["fill-outline-width"] : paint["line-width"]) ?? (type === "fill" ? 1 : void 0),
-      lineOpacity: number(paint["line-opacity"]),
-      minZoom: number(layer.minzoom),
-      maxZoom: number(layer.maxzoom)
-    });
-  }
-  return result;
-}
-function color(value) {
-  return typeof value === "string" && value.trim() !== "" ? value : void 0;
-}
-function number(value) {
-  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
-}
-
 // src/util/mercator.ts
 var EARTH_RADIUS = 6378137;
 var WORLD_METERS = 2 * Math.PI * EARTH_RADIUS;
@@ -701,6 +645,71 @@ function clampBBoxLatitude(bbox) {
 }
 function degreesPerPixel(zoom) {
   return 360 / worldSize(zoom);
+}
+
+// src/mvt/service.ts
+async function discoverVectorTileService(service, http, options = {}) {
+  const metadata = await http.json(service.base, { f: "json" });
+  const levels = (metadata.tileInfo?.lods ?? []).map((lod) => Number(lod.level)).filter((level) => Number.isFinite(level));
+  const minZoom = levels.length > 0 ? Math.min(...levels) : 0;
+  const maxZoom = levels.length > 0 ? Math.max(...levels) : 19;
+  const tileTemplate = metadata.tiles?.[0] ?? "tile/{z}/{y}/{x}.pbf";
+  const styleUrl = options.styleUrl ?? `${service.base}/resources/styles/root.json`;
+  let styleLayers = [];
+  try {
+    styleLayers = parseStyleLayers(await http.json(styleUrl));
+  } catch {
+  }
+  return {
+    url: service.base,
+    title: options.title ?? metadata.name ?? service.base,
+    tileTemplate,
+    tileSize: 512,
+    extent: 4096,
+    minZoom,
+    maxZoom,
+    fullExtent: parseExtent(metadata.fullExtent),
+    styleLayers,
+    styleUrl
+  };
+}
+function parseStyleLayers(style) {
+  const result = [];
+  for (const layer of style.layers ?? []) {
+    const type = layer.type === "fill" ? "fill" : layer.type === "line" ? "line" : null;
+    if (!type) continue;
+    const paint = layer.paint ?? {};
+    const sourceLayer = typeof layer["source-layer"] === "string" ? layer["source-layer"] : String(layer.id ?? "");
+    if (!sourceLayer) continue;
+    result.push({
+      id: String(layer.id ?? sourceLayer),
+      sourceLayer,
+      type,
+      fillColor: color(paint["fill-color"]),
+      fillOpacity: number(paint["fill-opacity"]),
+      // Fill layers carry their border in fill-outline-*.
+      lineColor: color(type === "fill" ? paint["fill-outline-color"] : paint["line-color"]),
+      lineWidth: number(type === "fill" ? paint["fill-outline-width"] : paint["line-width"]) ?? (type === "fill" ? 1 : void 0),
+      lineOpacity: number(paint["line-opacity"]),
+      minZoom: number(layer.minzoom),
+      maxZoom: number(layer.maxzoom)
+    });
+  }
+  return result;
+}
+function parseExtent(extent) {
+  if (!extent) return void 0;
+  const { xmin, ymin, xmax, ymax } = extent;
+  if (![xmin, ymin, xmax, ymax].every((value) => typeof value === "number")) return void 0;
+  const wkid = extent.spatialReference?.latestWkid ?? extent.spatialReference?.wkid;
+  if (wkid === 4326) return [xmin, ymin, xmax, ymax];
+  return metersToBbox([xmin, ymin, xmax, ymax]);
+}
+function color(value) {
+  return typeof value === "string" && value.trim() !== "" ? value : void 0;
+}
+function number(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
 }
 
 // src/renderers/export-renderer.ts
@@ -1499,8 +1508,8 @@ function pointInRing(point, ring) {
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
     const [xi, yi] = ring[i];
     const [xj, yj] = ring[j];
-    const intersects = yi > point[1] !== yj > point[1] && point[0] < (xj - xi) * (point[1] - yi) / (yj - yi) + xi;
-    if (intersects) inside = !inside;
+    const intersects2 = yi > point[1] !== yj > point[1] && point[0] < (xj - xi) * (point[1] - yi) / (yj - yi) + xi;
+    if (intersects2) inside = !inside;
   }
   return inside;
 }
@@ -1708,6 +1717,11 @@ function tileX(lng, z) {
 }
 function tileY(lat, z) {
   return lngLatToWorld(0, lat).y * 2 ** z;
+}
+function tileToBBox(z, x, y) {
+  const northWest = tileToLngLat(x, y, z);
+  const southEast = tileToLngLat(x + 1, y + 1, z);
+  return [northWest.lng, southEast.lat, southEast.lng, northWest.lat];
 }
 function snapBBox(bbox, zoom, snapDelta = 1) {
   const z = clamp(Math.floor(zoom) - snapDelta, 0, MAX_TILE_ZOOM);
@@ -2412,7 +2426,10 @@ var MvtRenderer = class {
     this.controller = controller;
     this.setLoading(true);
     try {
-      const tiles = tilesFor(bbox, z);
+      const extent = service.fullExtent;
+      const tiles = tilesFor(bbox, z).filter(
+        (tile) => !extent || intersects(tileToBBox(tile.z, tile.x, tile.y), extent)
+      );
       const decoded = await Promise.all(
         tiles.map((tile) => this.loadTile(tile, controller.signal))
       );
@@ -2434,11 +2451,20 @@ var MvtRenderer = class {
     if (cached) return cached;
     const path = this.options.service.tileTemplate.replace("{z}", String(tile.z)).replace("{y}", String(tile.y)).replace("{x}", String(tile.x));
     const url = `${this.options.service.url}/${path}`;
-    const response = await this.options.http.request(url, {}, { signal });
-    const buffer = await response.arrayBuffer();
-    const decoded = decodeMvt(buffer);
-    this.cache.set(key, decoded);
-    return decoded;
+    try {
+      const response = await this.options.http.request(url, {}, { signal });
+      const buffer = await response.arrayBuffer();
+      const decoded = decodeMvt(buffer);
+      this.cache.set(key, decoded);
+      return decoded;
+    } catch (error) {
+      if (error instanceof NullIslandHttpError && (error.status === 404 || error.status === 400)) {
+        const empty = { layers: [] };
+        this.cache.set(key, empty);
+        return empty;
+      }
+      throw error;
+    }
   }
   draw(view, bbox, z, tiles, decoded) {
     const canvas = this.overlay.getCanvas();
@@ -2532,6 +2558,9 @@ function tracePath(context, points, offsetX, offsetY, scale, close) {
     else context.lineTo(px, py);
   });
   if (close) context.closePath();
+}
+function intersects(a, b) {
+  return a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1];
 }
 function styleVisible(style, zoom) {
   if (style.minZoom !== void 0 && zoom < style.minZoom) return false;

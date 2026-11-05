@@ -6,14 +6,14 @@
  * paths instead of tessellating one feature at a time.
  */
 
-import {isAbortError} from '../errors.ts';
+import {isAbortError, NullIslandHttpError} from '../errors.ts';
 import type {NormalizedLayerConfig} from '../config.ts';
 import type {HttpClient} from '../http.ts';
 import {decodeMvt, type MvtTile} from '../mvt/decode.ts';
 import type {MvtStyleLayer, VectorTileService} from '../mvt/service.ts';
 import {LRU} from '../util/lru.ts';
 import {clamp, lngLatToWorld, type BBox} from '../util/mercator.ts';
-import {tileX, tileY} from '../util/tiles.ts';
+import {tileToBBox, tileX, tileY} from '../util/tiles.ts';
 import {padBBox, type Viewport} from '../viewport.ts';
 import type {LayerRenderer} from './types.ts';
 
@@ -119,7 +119,10 @@ export class MvtRenderer implements LayerRenderer {
     this.setLoading(true);
 
     try {
-      const tiles = tilesFor(bbox, z);
+      const extent = service.fullExtent;
+      const tiles = tilesFor(bbox, z).filter(
+        (tile) => !extent || intersects(tileToBBox(tile.z, tile.x, tile.y), extent),
+      );
       const decoded = await Promise.all(
         tiles.map((tile) => this.loadTile(tile, controller.signal)),
       );
@@ -148,11 +151,25 @@ export class MvtRenderer implements LayerRenderer {
       .replace('{x}', String(tile.x));
     const url = `${this.options.service.url}/${path}`;
 
-    const response = await this.options.http.request(url, {}, {signal});
-    const buffer = await response.arrayBuffer();
-    const decoded = decodeMvt(buffer);
-    this.cache.set(key, decoded);
-    return decoded;
+    try {
+      const response = await this.options.http.request(url, {}, {signal});
+      const buffer = await response.arrayBuffer();
+      const decoded = decodeMvt(buffer);
+      this.cache.set(key, decoded);
+      return decoded;
+    } catch (error) {
+      // Tiles outside the service cache return 404. Treat them as empty
+      // instead of failing the whole layer.
+      if (
+        error instanceof NullIslandHttpError &&
+        (error.status === 404 || error.status === 400)
+      ) {
+        const empty: MvtTile = {layers: []};
+        this.cache.set(key, empty);
+        return empty;
+      }
+      throw error;
+    }
   }
 
   private draw(
@@ -275,6 +292,10 @@ function tracePath(
     else context.lineTo(px, py);
   });
   if (close) context.closePath();
+}
+
+function intersects(a: BBox, b: BBox): boolean {
+  return a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1];
 }
 
 function styleVisible(style: MvtStyleLayer, zoom: number): boolean {
