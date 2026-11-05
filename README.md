@@ -11,9 +11,27 @@
 
 # nullisland
 
-ArcGIS layers on Google Maps. Point it at a `MapServer` or `FeatureServer` URL and it draws that
+[![npm version](https://img.shields.io/npm/v/@offthemap/nullisland?logo=npm)](https://www.npmjs.com/package/@offthemap/nullisland)
+[![license](https://img.shields.io/npm/l/@offthemap/nullisland)](LICENSE)
+
+**ArcGIS layers on Google Maps.** Point it at a `MapServer` or `FeatureServer` URL and it draws that
 layer on your map — PBF features when the service serves them, a server-rendered image when it
 doesn't. Public layers need no token.
+
+![nullisland drawing NWS watches and warnings on Google Maps](https://raw.githubusercontent.com/josephcake/nullisland/main/assets/demo.png)
+
+*The demo, drawing the public NWS watches and warnings service on Google Maps.*
+
+## Why
+
+- **PBF first.** One binary request per viewport instead of a GeoJSON document; falls back to GeoJSON
+  or Esri JSON only when a server needs it.
+- **Works without CORS.** Export images load through `<img>` instead of `fetch`, so services that
+  don't send CORS headers still render.
+- **Viewport only.** Queries snap to the tile grid, cache what they fetch, and abort when the map
+  moves on.
+- **No token by default.** ArcGIS authentication is opt-in, with automatic retry on 498/499.
+- **No runtime dependencies.** ESM and CJS builds with TypeScript types.
 
 ## Install
 
@@ -32,10 +50,12 @@ const arc = new NullIsland({
   map,
   layers: [
     {
+      // A FeatureServer: rendered as PBF features in a Data layer.
       url: 'https://sampleserver6.arcgisonline.com/arcgis/rest/services/ServiceRequest/FeatureServer',
       color: '#e4572e',
     },
     {
+      // A MapServer: the server renders the image.
       url: 'https://sampleserver6.arcgisonline.com/arcgis/rest/services/USA/MapServer',
       opacity: 0.6,
     },
@@ -47,11 +67,13 @@ arc.on('error', console.error);
 await arc.ready;
 ```
 
+Public layers need no token. Pass `apiKey` only for services that require authentication.
+
 ## Demo
 
-`demo/` renders the public NWS watches and warnings service on a Google Map. Google's JS API
-requires an API key, so the page asks for one at runtime — nothing is committed, and the ArcGIS
-layer itself needs no token.
+`demo/` renders the public NWS watches and warnings service, and is what the screenshot above shows.
+Google's JS API requires a key, so the page asks for one at runtime — nothing is committed, and the
+ArcGIS layer itself needs no token.
 
 ```bash
 npm run build:demo   # bundle src/ into demo/nullisland.js
@@ -64,7 +86,7 @@ Each layer picks its own strategy:
 
 | Service | Strategy |
 | --- | --- |
-| MapServer with the `Map` capability | **Export** — server-rendered PNG placed over the map |
+| MapServer with the `Map` capability | **Export** — a server-rendered PNG placed over the map |
 | FeatureServer (or MapServer without export) | **Vector** — features drawn in a `google.maps.Data` layer |
 
 Vector layers query only the visible viewport, prefer `f=pbf`, fall back to GeoJSON then Esri JSON,
@@ -136,6 +158,7 @@ const arc = new NullIsland({
 
 ## Notes
 
+- **Browser only.** Requires the Google Maps JavaScript API; there is no headless or server mode.
 - **No token by default.** `apiKey` is only for services that require it.
 - **HTTPS only**, except localhost; set `allowInsecure: true` for an internal HTTP server.
 - **Vector ceiling.** `google.maps.Data` is comfortable with a few thousand features, not tens of
