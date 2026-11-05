@@ -2,15 +2,18 @@ import {readFileSync} from 'node:fs';
 import {describe, expect, it} from 'vitest';
 import {decodeFeatureCollection, decodeParts, groupRings, signedArea} from '../src/pbf/decode.ts';
 import {
+  concat,
   feature,
   featureCollection,
   featureResult,
   field,
   geometryPoint,
   geometryPolygon,
+  packedVarints,
   transform,
   valueInt,
   valueString,
+  zigzag,
 } from './helpers/encode.ts';
 
 const fixture = readFileSync(new URL('./fixtures/service-requests.pbf', import.meta.url));
@@ -64,6 +67,25 @@ describe('decodeFeatureCollection', () => {
     const geometry = decoded.features[0]!.geometry as {coordinates: [number, number]};
 
     expect(geometry.coordinates).toEqual([-90, 45]);
+  });
+
+  it('inherits the layer geometry type when Geometry omits it', () => {
+    // Esri omits geometryType inside Geometry when it matches FeatureResult.
+    const coords = [256, 256, 2, 0, 0, 2, -2, 0, 0, -2];
+    const geometry = concat(packedVarints(2, [5]), packedVarints(3, coords, zigzag));
+
+    const payload = featureCollection(
+      featureResult({
+        geometryType: 3,
+        features: [feature([valueInt(1)], geometry)],
+      }),
+    );
+
+    const decoded = decodeFeatureCollection(payload);
+    expect(decoded.features[0]!.geometry.type).toBe('polygon');
+    const polygon = decoded.features[0]!.geometry as {rings: Array<Array<[number, number]>>};
+    expect(polygon.rings).toHaveLength(1);
+    expect(polygon.rings[0]).toHaveLength(5);
   });
 
   it('rejects JSON responses', () => {

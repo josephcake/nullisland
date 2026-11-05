@@ -81,6 +81,17 @@ const GEOMETRY_TYPES = [
   'envelope',
 ] as const;
 
+/** Proto3 enum values for the geometry types we decode. */
+const GEOMETRY_TYPE_VALUES: Record<DecodedFeatureCollection['geometryType'], number> = {
+  point: 0,
+  multipoint: 1,
+  polyline: 2,
+  polygon: 3,
+  multipatch: 4,
+  envelope: 5,
+  none: 127,
+};
+
 const FIELD_TYPES: PbfFieldType[] = [
   'smallInteger',
   'integer',
@@ -186,8 +197,12 @@ function decodeFeatureResult(reader: PbfReader): DecodedFeatureCollection {
   }
 
   const stride = 2 + (hasZ ? 1 : 0) + (hasM ? 1 : 0);
+  // Esri omits geometryType from each Geometry when it equals the layer's
+  // type, so features must inherit the FeatureResult value. Without this,
+  // polygons decode as points (proto3 default 0).
+  const fallbackType = GEOMETRY_TYPE_VALUES[geometryType];
   const features = featureBuffers.map((buffer) =>
-    decodeFeature(new PbfReader(buffer), fields, transform, stride),
+    decodeFeature(new PbfReader(buffer), fields, transform, stride, fallbackType),
   );
 
   return {
@@ -276,6 +291,7 @@ function decodeFeature(
   fields: PbfField[],
   transform: PbfTransform | null,
   stride: number,
+  fallbackGeometryType: number,
 ): PbfFeature {
   const attributes: Record<string, unknown> = {};
   let attributeIndex = 0;
@@ -292,7 +308,7 @@ function decodeFeature(
         break;
       }
       case 2:
-        geometry = decodeGeometry(reader.readMessage(), transform, stride);
+        geometry = decodeGeometry(reader.readMessage(), transform, stride, fallbackGeometryType);
         break;
       default:
         reader.skip(wire);
@@ -359,8 +375,13 @@ function readScalarValue(field: number, reader: PbfReader): unknown {
   }
 }
 
-function decodeGeometry(reader: PbfReader, transform: PbfTransform | null, stride: number): PbfGeometry {
-  let geometryType = 0;
+function decodeGeometry(
+  reader: PbfReader,
+  transform: PbfTransform | null,
+  stride: number,
+  fallbackGeometryType: number,
+): PbfGeometry {
+  let geometryType = fallbackGeometryType;
   let lengths: number[] = [];
   let coords: number[] = [];
 

@@ -1095,6 +1095,15 @@ var GEOMETRY_TYPES = [
   "multipatch",
   "envelope"
 ];
+var GEOMETRY_TYPE_VALUES = {
+  point: 0,
+  multipoint: 1,
+  polyline: 2,
+  polygon: 3,
+  multipatch: 4,
+  envelope: 5,
+  none: 127
+};
 var FIELD_TYPES = [
   "smallInteger",
   "integer",
@@ -1185,8 +1194,9 @@ function decodeFeatureResult(reader) {
     }
   }
   const stride = 2 + (hasZ ? 1 : 0) + (hasM ? 1 : 0);
+  const fallbackType = GEOMETRY_TYPE_VALUES[geometryType];
   const features = featureBuffers.map(
-    (buffer) => decodeFeature(new PbfReader(buffer), fields, transform, stride)
+    (buffer) => decodeFeature(new PbfReader(buffer), fields, transform, stride, fallbackType)
   );
   return {
     objectIdField,
@@ -1262,7 +1272,7 @@ function decodeTransform(reader) {
   if (!Number.isFinite(transform.scaleY) || transform.scaleY === 0) transform.scaleY = 1;
   return transform;
 }
-function decodeFeature(reader, fields, transform, stride) {
+function decodeFeature(reader, fields, transform, stride, fallbackGeometryType) {
   const attributes = {};
   let attributeIndex = 0;
   let geometry = { type: "none" };
@@ -1277,7 +1287,7 @@ function decodeFeature(reader, fields, transform, stride) {
         break;
       }
       case 2:
-        geometry = decodeGeometry(reader.readMessage(), transform, stride);
+        geometry = decodeGeometry(reader.readMessage(), transform, stride, fallbackGeometryType);
         break;
       default:
         reader.skip(wire);
@@ -1340,8 +1350,8 @@ function readScalarValue(field, reader) {
       return null;
   }
 }
-function decodeGeometry(reader, transform, stride) {
-  let geometryType = 0;
+function decodeGeometry(reader, transform, stride, fallbackGeometryType) {
+  let geometryType = fallbackGeometryType;
   let lengths = [];
   let coords = [];
   while (!reader.eof) {
