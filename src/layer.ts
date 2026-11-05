@@ -5,9 +5,11 @@
 
 import {NullIslandError} from './errors.ts';
 import {discoverService, type ArcGisService} from './discovery.ts';
+import {discoverVectorTileService, type VectorTileService} from './mvt/service.ts';
 import type {NormalizedLayerConfig} from './config.ts';
 import {ExportRenderer} from './renderers/export-renderer.ts';
 import {VectorRenderer} from './renderers/vector-renderer.ts';
+import {MvtRenderer} from './renderers/mvt-renderer.ts';
 import type {LayerRenderer} from './renderers/types.ts';
 import type {HttpClient} from './http.ts';
 import type {NullIslandLayer, NullIslandSublayer, LayerState, ResolvedMode} from './types.ts';
@@ -31,7 +33,7 @@ export interface LayerContext {
 
 export class LayerController implements NullIslandLayer {
   readonly config: NormalizedLayerConfig;
-  service: ArcGisService | null = null;
+  service: ArcGisService | VectorTileService | null = null;
   renderer: LayerRenderer | null = null;
   state: LayerState = 'idle';
   message: string | undefined;
@@ -72,7 +74,9 @@ export class LayerController implements NullIslandLayer {
   }
 
   get sublayers(): readonly NullIslandSublayer[] {
-    return (this.service?.sublayers ?? []).map((sublayer) => ({
+    const service = this.service;
+    if (!service || !('sublayers' in service)) return [];
+    return service.sublayers.map((sublayer) => ({
       id: sublayer.id,
       name: sublayer.name,
     }));
@@ -80,6 +84,32 @@ export class LayerController implements NullIslandLayer {
 
   async init(): Promise<void> {
     this.state = 'loading';
+
+    if (this.config.service.kind === 'VectorTileServer') {
+      const vectorTiles = await discoverVectorTileService(this.config.service, this.context.http, {
+        title: this.config.title,
+        styleUrl: this.config.styleUrl,
+      });
+      this.service = vectorTiles;
+      this.layerTitle = this.config.title ?? vectorTiles.title;
+      this.minZoom = this.config.minZoom ?? vectorTiles.minZoom;
+      this.maxZoom = this.config.maxZoom ?? vectorTiles.maxZoom;
+      this.renderer = new MvtRenderer({
+        map: this.context.map,
+        google: this.context.google,
+        http: this.context.http,
+        layer: this.config,
+        service: vectorTiles,
+        opacity: this.config.opacity,
+        padding: this.context.padding,
+        onLoading: (loading: boolean) => this.context.onLoading(this.id, loading),
+        onError: (error: Error) => this.context.onError(error),
+      });
+      this.state = 'ready';
+      if (this.isVisible && this.currentView) this.sync(this.currentView);
+      return;
+    }
+
     const service = await discoverService(this.config.service, this.context.http, {
       sublayers: this.config.sublayers,
       title: this.config.title,

@@ -47,9 +47,9 @@ function isAbortError(error) {
 }
 
 // src/util/color.ts
-function parseColor(color) {
-  if (Array.isArray(color)) {
-    const [r2, g2, b2, a2 = 255] = color;
+function parseColor(color2) {
+  if (Array.isArray(color2)) {
+    const [r2, g2, b2, a2 = 255] = color2;
     for (const channel of [r2, g2, b2, a2]) {
       if (!Number.isFinite(channel) || channel < 0 || channel > 255) {
         throw new NullIslandConfigError(`Invalid color channel: ${channel}`);
@@ -57,12 +57,12 @@ function parseColor(color) {
     }
     return [Math.round(r2), Math.round(g2), Math.round(b2), Math.round(a2)];
   }
-  if (typeof color !== "string") {
+  if (typeof color2 !== "string") {
     throw new NullIslandConfigError("Color must be a hex string or RGBA tuple");
   }
-  const value = color.trim().replace(/^#/, "");
+  const value = color2.trim().replace(/^#/, "");
   if (!/^[0-9a-f]+$/i.test(value) || ![3, 4, 6, 8].includes(value.length)) {
-    throw new NullIslandConfigError(`Invalid color: ${color}`);
+    throw new NullIslandConfigError(`Invalid color: ${color2}`);
   }
   const expand = value.length <= 4 ? [...value].map((c) => c + c).join("") : value;
   const channels = (expand.match(/.{2}/g) ?? []).map((c) => Number.parseInt(c, 16));
@@ -72,8 +72,8 @@ function parseColor(color) {
 function rgbaToCss([r, g, b, a]) {
   return `rgba(${r}, ${g}, ${b}, ${a / 255})`;
 }
-function applyOpacity(color, opacity) {
-  return [color[0], color[1], color[2], Math.round(color[3] * opacity)];
+function applyOpacity(color2, opacity) {
+  return [color2[0], color2[1], color2[2], Math.round(color2[3] * opacity)];
 }
 
 // src/config.ts
@@ -102,14 +102,15 @@ function parseServiceUrl(input, options = {}) {
       `Layer url must use https (got ${input}); pass allowInsecure: true to override`
     );
   }
-  const match = /^(.*\/(mapserver|featureserver))(?:\/(\d+))?\/?$/i.exec(parsed.pathname);
+  const match = /^(.*\/(mapserver|featureserver|vectortileserver))(?:\/(\d+))?\/?$/i.exec(parsed.pathname);
   if (!match) {
     throw new NullIslandConfigError(
       `Layer url must point at a MapServer or FeatureServer: ${input}`
     );
   }
   const base = `${parsed.origin}${match[1]}`;
-  const kind = match[2].toLowerCase() === "mapserver" ? "MapServer" : "FeatureServer";
+  const name = match[2].toLowerCase();
+  const kind = name === "mapserver" ? "MapServer" : name === "featureserver" ? "FeatureServer" : "VectorTileServer";
   const layerId = match[3] === void 0 ? null : Number(match[3]);
   return { base, kind, layerId };
 }
@@ -140,7 +141,7 @@ function normalizeLayer(config, usedIds = /* @__PURE__ */ new Set(), options = {
     throw new NullIslandConfigError("Layer config must be an object");
   }
   const service = parseServiceUrl(config.url, options);
-  const color = config.color === void 0 ? void 0 : normalizeColor(config.color);
+  const color2 = config.color === void 0 ? void 0 : normalizeColor(config.color);
   const opacity = config.opacity === void 0 ? 1 : config.opacity;
   if (!Number.isFinite(opacity) || opacity < 0 || opacity > 1) {
     throw new NullIslandConfigError(`opacity must be between 0 and 1, received ${String(config.opacity)}`);
@@ -165,20 +166,21 @@ function normalizeLayer(config, usedIds = /* @__PURE__ */ new Set(), options = {
     title: config.title?.trim() || void 0,
     url: config.url,
     service,
-    color,
+    color: color2,
     opacity,
     minZoom,
     maxZoom,
     visible: config.visible !== false,
     mode,
     sublayers,
+    styleUrl: config.styleUrl,
     maxFeatures,
     maxPages
   };
 }
-function normalizeColor(color) {
+function normalizeColor(color2) {
   try {
-    return parseColor(color);
+    return parseColor(color2);
   } catch (error) {
     throw new NullIslandConfigError(error instanceof Error ? error.message : "Invalid color");
   }
@@ -576,6 +578,62 @@ async function mapLimit(items, limit, mapper) {
   });
   await Promise.all(workers);
   return results;
+}
+
+// src/mvt/service.ts
+async function discoverVectorTileService(service, http, options = {}) {
+  const metadata = await http.json(service.base, { f: "json" });
+  const levels = (metadata.tileInfo?.lods ?? []).map((lod) => Number(lod.level)).filter((level) => Number.isFinite(level));
+  const minZoom = levels.length > 0 ? Math.min(...levels) : 0;
+  const maxZoom = levels.length > 0 ? Math.max(...levels) : 19;
+  const tileTemplate = metadata.tiles?.[0] ?? "tile/{z}/{y}/{x}.pbf";
+  const styleUrl = options.styleUrl ?? `${service.base}/resources/styles/root.json`;
+  let styleLayers = [];
+  try {
+    styleLayers = parseStyleLayers(await http.json(styleUrl));
+  } catch {
+  }
+  return {
+    url: service.base,
+    title: options.title ?? metadata.name ?? service.base,
+    tileTemplate,
+    tileSize: 512,
+    extent: 4096,
+    minZoom,
+    maxZoom,
+    styleLayers,
+    styleUrl
+  };
+}
+function parseStyleLayers(style) {
+  const result = [];
+  for (const layer of style.layers ?? []) {
+    const type = layer.type === "fill" ? "fill" : layer.type === "line" ? "line" : null;
+    if (!type) continue;
+    const paint = layer.paint ?? {};
+    const sourceLayer = typeof layer["source-layer"] === "string" ? layer["source-layer"] : String(layer.id ?? "");
+    if (!sourceLayer) continue;
+    result.push({
+      id: String(layer.id ?? sourceLayer),
+      sourceLayer,
+      type,
+      fillColor: color(paint["fill-color"]),
+      fillOpacity: number(paint["fill-opacity"]),
+      // Fill layers carry their border in fill-outline-*.
+      lineColor: color(type === "fill" ? paint["fill-outline-color"] : paint["line-color"]),
+      lineWidth: number(type === "fill" ? paint["fill-outline-width"] : paint["line-width"]) ?? (type === "fill" ? 1 : void 0),
+      lineOpacity: number(paint["line-opacity"]),
+      minZoom: number(layer.minzoom),
+      maxZoom: number(layer.maxzoom)
+    });
+  }
+  return result;
+}
+function color(value) {
+  return typeof value === "string" && value.trim() !== "" ? value : void 0;
+}
+function number(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
 }
 
 // src/util/mercator.ts
@@ -1553,8 +1611,8 @@ function symbolToStyle(symbol, context) {
     strokeWeight: clampNumber(outline?.width ?? 1, 0, 10)
   };
 }
-function styleForColor(color, opacity, geometryType, googleApi) {
-  const fill = applyOpacity(color, opacity);
+function styleForColor(color2, opacity, geometryType, googleApi) {
+  const fill = applyOpacity(color2, opacity);
   if (geometryType === "esriGeometryPolyline") {
     return { strokeColor: rgbaToCss(fill), strokeOpacity: 1, strokeWeight: 2, fillOpacity: 0 };
   }
@@ -1569,7 +1627,7 @@ function styleForColor(color, opacity, geometryType, googleApi) {
   return {
     fillColor: rgbaToCss(fill),
     fillOpacity: 1,
-    strokeColor: rgbaToCss(applyOpacity(darken(color), opacity)),
+    strokeColor: rgbaToCss(applyOpacity(darken(color2), opacity)),
     strokeOpacity: 1,
     strokeWeight: 1
   };
@@ -1586,9 +1644,9 @@ function pointIcon(googleApi, fill, size, strokeWidth) {
     }
   };
 }
-function colorToRgba(color, fallback) {
-  if (!Array.isArray(color) || color.length < 3) return fallback;
-  const [r = fallback[0], g = fallback[1], b = fallback[2], a = 255] = color;
+function colorToRgba(color2, fallback) {
+  if (!Array.isArray(color2) || color2.length < 3) return fallback;
+  const [r = fallback[0], g = fallback[1], b = fallback[2], a = 255] = color2;
   return [clampChannel(r), clampChannel(g), clampChannel(b), clampChannel(a)];
 }
 function clampChannel(value) {
@@ -2054,6 +2112,514 @@ function toError2(error) {
   return error instanceof Error ? error : new Error(String(error));
 }
 
+// src/mvt/decode.ts
+var GEOMETRY_TYPES2 = ["unknown", "point", "line", "polygon"];
+var MOVE_TO = 1;
+var LINE_TO = 2;
+var CLOSE_PATH = 7;
+var DEFAULT_EXTENT = 4096;
+function decodeMvt(input) {
+  const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
+  const reader = new PbfReader(bytes);
+  const layers = [];
+  while (!reader.eof) {
+    const { field, wire } = reader.readTag();
+    if (field === 3 && wire === WIRE_LENGTH_DELIMITED) {
+      layers.push(decodeLayer(reader.readMessage()));
+    } else {
+      reader.skip(wire);
+    }
+  }
+  return { layers };
+}
+function decodeLayer(reader) {
+  let name = "";
+  let extent = DEFAULT_EXTENT;
+  let version = 1;
+  const keys = [];
+  const values = [];
+  const featureBuffers = [];
+  while (!reader.eof) {
+    const { field, wire } = reader.readTag();
+    switch (field) {
+      case 1:
+        name = reader.readString();
+        break;
+      case 2:
+        featureBuffers.push(reader.readBytes());
+        break;
+      case 3:
+        keys.push(reader.readString());
+        break;
+      case 4:
+        values.push(decodeValue2(reader.readMessage()));
+        break;
+      case 5:
+        extent = reader.readVarintNumber();
+        break;
+      case 15:
+        version = reader.readVarintNumber();
+        break;
+      default:
+        reader.skip(wire);
+    }
+  }
+  const features = featureBuffers.map((buffer) => decodeFeature2(new PbfReader(buffer), keys, values));
+  return { name, extent: extent || DEFAULT_EXTENT, version, features };
+}
+function decodeFeature2(reader, keys, values) {
+  let id;
+  let geometryType = 0;
+  let tags = [];
+  let commands = [];
+  while (!reader.eof) {
+    const { field, wire } = reader.readTag();
+    switch (field) {
+      case 1:
+        id = reader.readVarintNumber();
+        break;
+      case 2:
+        tags = wire === WIRE_LENGTH_DELIMITED ? reader.readPackedUint32() : [reader.readVarintNumber()];
+        break;
+      case 3:
+        geometryType = reader.readVarintNumber();
+        break;
+      case 4:
+        commands = wire === WIRE_LENGTH_DELIMITED ? reader.readPackedUint32() : [reader.readVarintNumber()];
+        break;
+      default:
+        reader.skip(wire);
+    }
+  }
+  const properties = {};
+  for (let i = 0; i + 1 < tags.length; i += 2) {
+    const key = keys[tags[i]];
+    if (key !== void 0) properties[key] = values[tags[i + 1]] ?? null;
+  }
+  return {
+    ...id === void 0 ? {} : { id },
+    type: GEOMETRY_TYPES2[geometryType] ?? "unknown",
+    paths: decodeGeometry2(commands, geometryType),
+    properties
+  };
+}
+function decodeGeometry2(commands, geometryType) {
+  if (geometryType === 1) return decodePoints(commands);
+  return decodePaths(commands, geometryType === 3);
+}
+function decodePoints(commands) {
+  const points = [];
+  let x = 0;
+  let y = 0;
+  for (let i = 0; i < commands.length; ) {
+    const command = commands[i++];
+    if ((command & 7) !== MOVE_TO) break;
+    const count = command >> 3;
+    for (let n = 0; n < count; n += 1) {
+      x += zigzag(commands[i++]);
+      y += zigzag(commands[i++]);
+      points.push([x, y]);
+    }
+  }
+  return points.length > 0 ? [points] : [];
+}
+function decodePaths(commands, closeRings) {
+  const paths = [];
+  let current = null;
+  let x = 0;
+  let y = 0;
+  for (let i = 0; i < commands.length; ) {
+    const command = commands[i++];
+    const id = command & 7;
+    const count = command >> 3;
+    if (id === MOVE_TO) {
+      for (let n = 0; n < count; n += 1) {
+        x += zigzag(commands[i++]);
+        y += zigzag(commands[i++]);
+        current = [[x, y]];
+        paths.push(current);
+      }
+      continue;
+    }
+    if (id === LINE_TO) {
+      if (!current) {
+        current = [[x, y]];
+        paths.push(current);
+      }
+      for (let n = 0; n < count; n += 1) {
+        x += zigzag(commands[i++]);
+        y += zigzag(commands[i++]);
+        current.push([x, y]);
+      }
+      continue;
+    }
+    if (id === CLOSE_PATH && current) {
+      const first = current[0];
+      const last = current[current.length - 1];
+      if (closeRings && (first[0] !== last[0] || first[1] !== last[1])) current.push([first[0], first[1]]);
+    }
+  }
+  return paths;
+}
+function decodeValue2(reader) {
+  let value = null;
+  while (!reader.eof) {
+    const { field, wire } = reader.readTag();
+    switch (field) {
+      case 1:
+        value = reader.readString();
+        break;
+      case 2:
+        value = reader.readFloat();
+        break;
+      case 3:
+        value = reader.readDouble();
+        break;
+      case 4:
+        value = reader.readInt64();
+        break;
+      case 5:
+        value = reader.readUint64();
+        break;
+      case 6:
+        value = reader.readSint64();
+        break;
+      case 7:
+        value = reader.readBool();
+        break;
+      default:
+        reader.skip(wire);
+    }
+  }
+  return value;
+}
+function zigzag(value) {
+  return value >>> 1 ^ -(value & 1);
+}
+
+// src/viewport.ts
+function readViewport(map, dpr) {
+  const zoom = map.getZoom();
+  const center = map.getCenter();
+  const projection = map.getProjection();
+  const div = map.getDiv();
+  if (zoom === void 0 || zoom === null || !center || !projection || !div) return null;
+  const width = div.clientWidth || div.offsetWidth;
+  const height = div.clientHeight || div.offsetHeight;
+  if (!width || !height) return null;
+  const point = projection.fromLatLngToPoint(center);
+  if (!point) return null;
+  const scale = 2 ** zoom;
+  const centerX = point.x * scale;
+  const centerY = point.y * scale;
+  const left = centerX - width / 2;
+  const right = centerX + width / 2;
+  const top = centerY - height / 2;
+  const bottom = centerY + height / 2;
+  const metersPerPixel = WORLD_METERS / (256 * scale);
+  const bounds3857 = [
+    -HALF_WORLD + left * metersPerPixel,
+    HALF_WORLD - bottom * metersPerPixel,
+    -HALF_WORLD + right * metersPerPixel,
+    HALF_WORLD - top * metersPerPixel
+  ];
+  return {
+    zoom,
+    width,
+    height,
+    dpr,
+    center: { lng: center.lng(), lat: center.lat() },
+    bounds3857,
+    bounds4326: clampBBoxLatitude(metersToBbox(bounds3857))
+  };
+}
+function padBBox(bbox, padding) {
+  const [west, south, east, north] = bbox;
+  const dx = (east - west) * padding;
+  const dy = (north - south) * padding;
+  return [west - dx, south - dy, east + dx, north + dy];
+}
+
+// src/renderers/mvt-renderer.ts
+var PALETTE = ["#4c7dff", "#e8590c", "#f2b705", "#2f9e44", "#9c36b5", "#0c8599"];
+var MvtRenderer = class {
+  constructor(options) {
+    __publicField(this, "options", options);
+    __publicField(this, "mode", "mvt");
+    __publicField(this, "overlay");
+    __publicField(this, "cache");
+    __publicField(this, "controller", null);
+    __publicField(this, "generation", 0);
+    __publicField(this, "attached", false);
+    __publicField(this, "loading", false);
+    __publicField(this, "opacity");
+    __publicField(this, "renderedKey", null);
+    __publicField(this, "lastView", null);
+    this.opacity = options.opacity;
+    this.cache = new LRU(64);
+    this.overlay = new MvtCanvasOverlay(options.google, options.map);
+  }
+  attach() {
+    if (this.attached) return;
+    this.overlay.setMap(this.options.map);
+    this.attached = true;
+  }
+  detach() {
+    if (!this.attached) return;
+    this.overlay.setMap(null);
+    this.attached = false;
+  }
+  update(view) {
+    this.lastView = view;
+    void this.render(view);
+  }
+  prefetch(view) {
+    void this.render(view);
+  }
+  setOpacity(opacity) {
+    this.opacity = opacity;
+    this.renderedKey = null;
+    if (this.lastView) void this.render(this.lastView);
+  }
+  refresh() {
+    this.cache.clear();
+    this.renderedKey = null;
+    if (this.lastView) void this.render(this.lastView);
+  }
+  destroy() {
+    this.generation += 1;
+    this.controller?.abort();
+    this.overlay.destroy();
+    this.cache.clear();
+    this.attached = false;
+    this.lastView = null;
+    this.renderedKey = null;
+  }
+  setLoading(loading) {
+    if (this.loading === loading) return;
+    this.loading = loading;
+    this.options.onLoading(loading);
+  }
+  async render(view) {
+    const { service, padding, layer } = this.options;
+    const bbox = padBBox(view.bounds4326, padding);
+    const z = clamp(Math.round(view.zoom) - 1, service.minZoom, service.maxZoom);
+    const key = `${z}|${view.zoom.toFixed(2)}|${bbox.map((value) => value.toFixed(4)).join(",")}`;
+    if (key === this.renderedKey) return;
+    const generation = ++this.generation;
+    this.controller?.abort();
+    const controller = new AbortController();
+    this.controller = controller;
+    this.setLoading(true);
+    try {
+      const tiles = tilesFor(bbox, z);
+      const decoded = await Promise.all(
+        tiles.map((tile) => this.loadTile(tile, controller.signal))
+      );
+      if (generation !== this.generation) return;
+      this.draw(view, bbox, z, tiles, decoded);
+      this.overlay.setBounds(bbox);
+      this.renderedKey = key;
+    } catch (error) {
+      if (!isAbortError(error)) {
+        this.options.onError(error instanceof Error ? error : new Error(String(error)));
+      }
+    } finally {
+      if (generation === this.generation) this.setLoading(false);
+    }
+  }
+  async loadTile(tile, signal) {
+    const key = `${tile.z}/${tile.x}/${tile.y}`;
+    const cached = this.cache.get(key);
+    if (cached) return cached;
+    const path = this.options.service.tileTemplate.replace("{z}", String(tile.z)).replace("{y}", String(tile.y)).replace("{x}", String(tile.x));
+    const url = `${this.options.service.url}/${path}`;
+    const response = await this.options.http.request(url, {}, { signal });
+    const buffer = await response.arrayBuffer();
+    const decoded = decodeMvt(buffer);
+    this.cache.set(key, decoded);
+    return decoded;
+  }
+  draw(view, bbox, z, tiles, decoded) {
+    const canvas = this.overlay.getCanvas();
+    if (!canvas) return;
+    const { padding, service, layer } = this.options;
+    const dpr = view.dpr;
+    const cssWidth = Math.max(1, Math.round(view.width * (1 + padding * 2)));
+    const cssHeight = Math.max(1, Math.round(view.height * (1 + padding * 2)));
+    canvas.width = Math.round(cssWidth * dpr);
+    canvas.height = Math.round(cssHeight * dpr);
+    canvas.style.width = `${cssWidth}px`;
+    canvas.style.height = `${cssHeight}px`;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    context.clearRect(0, 0, cssWidth, cssHeight);
+    context.globalAlpha = this.opacity;
+    context.lineJoin = "round";
+    context.lineCap = "round";
+    const northWest = lngLatToWorld(bbox[0], bbox[3]);
+    const originX = northWest.x * 256 * 2 ** view.zoom;
+    const originY = northWest.y * 256 * 2 ** view.zoom;
+    const tilePx = 256 * 2 ** (view.zoom - z);
+    for (let index = 0; index < tiles.length; index += 1) {
+      const data = decoded[index];
+      if (!data) continue;
+      const tile = tiles[index];
+      const offsetX = tile.x * tilePx - originX;
+      const offsetY = tile.y * tilePx - originY;
+      if (service.styleLayers.length > 0) {
+        for (const style of service.styleLayers) {
+          if (!styleVisible(style, view.zoom)) continue;
+          for (const mvtLayer of data.layers) {
+            if (mvtLayer.name !== style.sourceLayer) continue;
+            const scale = tilePx / (mvtLayer.extent || service.extent);
+            this.drawFeatures(context, mvtLayer.features, style, offsetX, offsetY, scale);
+          }
+        }
+      } else {
+        data.layers.forEach((mvtLayer, layerIndex) => {
+          const style = {
+            id: mvtLayer.name,
+            sourceLayer: mvtLayer.name,
+            type: "fill",
+            fillColor: PALETTE[layerIndex % PALETTE.length],
+            fillOpacity: 0.45,
+            lineColor: PALETTE[layerIndex % PALETTE.length],
+            lineWidth: 1,
+            lineOpacity: 0.9,
+            minZoom: void 0,
+            maxZoom: void 0
+          };
+          const scale = tilePx / (mvtLayer.extent || service.extent);
+          this.drawFeatures(context, mvtLayer.features, style, offsetX, offsetY, scale);
+        });
+      }
+    }
+  }
+  drawFeatures(context, features, style, offsetX, offsetY, scale) {
+    for (const feature of features) {
+      if (feature.type === "polygon") {
+        context.beginPath();
+        for (const ring of feature.paths) {
+          tracePath(context, ring, offsetX, offsetY, scale, true);
+        }
+        context.globalAlpha = this.opacity * (style.fillOpacity ?? 0.55);
+        context.fillStyle = style.fillColor ?? "rgba(76, 125, 255, 0.45)";
+        context.fill("evenodd");
+        if (style.lineColor) {
+          context.globalAlpha = this.opacity * (style.lineOpacity ?? style.fillOpacity ?? 0.8);
+          context.strokeStyle = style.lineColor;
+          context.lineWidth = style.lineWidth ?? 1;
+          context.stroke();
+        }
+      } else if (feature.type === "line" && style.type === "line") {
+        context.beginPath();
+        for (const path of feature.paths) tracePath(context, path, offsetX, offsetY, scale, false);
+        context.globalAlpha = this.opacity * (style.lineOpacity ?? 0.85);
+        context.strokeStyle = style.lineColor ?? style.fillColor ?? "#4c7dff";
+        context.lineWidth = style.lineWidth ?? 1.5;
+        context.stroke();
+      }
+    }
+  }
+};
+function tracePath(context, points, offsetX, offsetY, scale, close) {
+  points.forEach(([x, y], index) => {
+    const px = offsetX + x * scale;
+    const py = offsetY + y * scale;
+    if (index === 0) context.moveTo(px, py);
+    else context.lineTo(px, py);
+  });
+  if (close) context.closePath();
+}
+function styleVisible(style, zoom) {
+  if (style.minZoom !== void 0 && zoom < style.minZoom) return false;
+  if (style.maxZoom !== void 0 && zoom > style.maxZoom) return false;
+  return true;
+}
+function tilesFor(bbox, z) {
+  const max = 2 ** z - 1;
+  const x0 = clamp(Math.floor(tileX(bbox[0], z)), 0, max);
+  const x1 = clamp(Math.floor(tileX(bbox[2], z)), 0, max);
+  const y0 = clamp(Math.floor(tileY(bbox[3], z)), 0, max);
+  const y1 = clamp(Math.floor(tileY(bbox[1], z)), 0, max);
+  const tiles = [];
+  for (let x = x0; x <= x1; x += 1) {
+    for (let y = y0; y <= y1; y += 1) tiles.push({ z, x, y });
+  }
+  return tiles;
+}
+var MvtCanvasOverlay = class {
+  constructor(googleApi, map) {
+    __publicField(this, "overlay");
+    __publicField(this, "container", null);
+    __publicField(this, "canvas", null);
+    __publicField(this, "bounds", null);
+    const overlay = new googleApi.maps.OverlayView();
+    overlay.onAdd = () => this.onAdd();
+    overlay.draw = () => this.position();
+    overlay.onRemove = () => this.onRemove();
+    this.overlay = overlay;
+    this.overlay.setMap(map);
+  }
+  setMap(map) {
+    this.overlay.setMap(map);
+  }
+  getCanvas() {
+    return this.canvas;
+  }
+  setBounds(bounds) {
+    this.bounds = bounds;
+    this.position();
+  }
+  destroy() {
+    this.overlay.setMap(null);
+    this.onRemove();
+  }
+  onAdd() {
+    const panes = this.overlay.getPanes();
+    if (!panes) return;
+    const container = document.createElement("div");
+    container.style.position = "absolute";
+    container.style.left = "0";
+    container.style.top = "0";
+    container.style.pointerEvents = "none";
+    const canvas = document.createElement("canvas");
+    canvas.style.position = "absolute";
+    canvas.style.left = "0";
+    canvas.style.top = "0";
+    canvas.style.pointerEvents = "none";
+    container.appendChild(canvas);
+    panes.overlayLayer.appendChild(container);
+    this.container = container;
+    this.canvas = canvas;
+    this.position();
+  }
+  onRemove() {
+    this.container?.remove();
+    this.container = null;
+    this.canvas = null;
+  }
+  position() {
+    if (!this.container || !this.canvas || !this.bounds) return;
+    const projection = this.overlay.getProjection();
+    if (!projection) return;
+    const [west, south, east, north] = this.bounds;
+    const northWest = projection.fromLatLngToDivPixel({ lat: north, lng: west });
+    const southEast = projection.fromLatLngToDivPixel({ lat: south, lng: east });
+    if (!northWest || !southEast) return;
+    const width = Math.max(0, southEast.x - northWest.x);
+    const height = Math.max(0, southEast.y - northWest.y);
+    this.container.style.left = `${northWest.x}px`;
+    this.container.style.top = `${northWest.y}px`;
+    this.container.style.width = `${width}px`;
+    this.container.style.height = `${height}px`;
+    this.canvas.style.width = `${width}px`;
+    this.canvas.style.height = `${height}px`;
+  }
+};
+
 // src/layer.ts
 var LayerController = class {
   constructor(config, context) {
@@ -2088,13 +2654,39 @@ var LayerController = class {
     return this.isVisible;
   }
   get sublayers() {
-    return (this.service?.sublayers ?? []).map((sublayer) => ({
+    const service = this.service;
+    if (!service || !("sublayers" in service)) return [];
+    return service.sublayers.map((sublayer) => ({
       id: sublayer.id,
       name: sublayer.name
     }));
   }
   async init() {
     this.state = "loading";
+    if (this.config.service.kind === "VectorTileServer") {
+      const vectorTiles = await discoverVectorTileService(this.config.service, this.context.http, {
+        title: this.config.title,
+        styleUrl: this.config.styleUrl
+      });
+      this.service = vectorTiles;
+      this.layerTitle = this.config.title ?? vectorTiles.title;
+      this.minZoom = this.config.minZoom ?? vectorTiles.minZoom;
+      this.maxZoom = this.config.maxZoom ?? vectorTiles.maxZoom;
+      this.renderer = new MvtRenderer({
+        map: this.context.map,
+        google: this.context.google,
+        http: this.context.http,
+        layer: this.config,
+        service: vectorTiles,
+        opacity: this.config.opacity,
+        padding: this.context.padding,
+        onLoading: (loading) => this.context.onLoading(this.id, loading),
+        onError: (error) => this.context.onError(error)
+      });
+      this.state = "ready";
+      if (this.isVisible && this.currentView) this.sync(this.currentView);
+      return;
+    }
     const service = await discoverService(this.config.service, this.context.http, {
       sublayers: this.config.sublayers,
       title: this.config.title
@@ -2189,43 +2781,6 @@ var LayerController = class {
     return service.supportsExport ? "export" : "vector";
   }
 };
-
-// src/viewport.ts
-function readViewport(map, dpr) {
-  const zoom = map.getZoom();
-  const center = map.getCenter();
-  const projection = map.getProjection();
-  const div = map.getDiv();
-  if (zoom === void 0 || zoom === null || !center || !projection || !div) return null;
-  const width = div.clientWidth || div.offsetWidth;
-  const height = div.clientHeight || div.offsetHeight;
-  if (!width || !height) return null;
-  const point = projection.fromLatLngToPoint(center);
-  if (!point) return null;
-  const scale = 2 ** zoom;
-  const centerX = point.x * scale;
-  const centerY = point.y * scale;
-  const left = centerX - width / 2;
-  const right = centerX + width / 2;
-  const top = centerY - height / 2;
-  const bottom = centerY + height / 2;
-  const metersPerPixel = WORLD_METERS / (256 * scale);
-  const bounds3857 = [
-    -HALF_WORLD + left * metersPerPixel,
-    HALF_WORLD - bottom * metersPerPixel,
-    -HALF_WORLD + right * metersPerPixel,
-    HALF_WORLD - top * metersPerPixel
-  ];
-  return {
-    zoom,
-    width,
-    height,
-    dpr,
-    center: { lng: center.lng(), lat: center.lat() },
-    bounds3857,
-    bounds4326: clampBBoxLatitude(metersToBbox(bounds3857))
-  };
-}
 
 // src/engine.ts
 var INDICATOR_DELAY_MS = 300;

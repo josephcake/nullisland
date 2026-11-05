@@ -9,7 +9,7 @@ import {NullIslandConfigError} from './errors.ts';
 import type {ArcGisLayerConfig, Color, LayerMode, RGBA} from './types.ts';
 import {parseColor} from './util/color.ts';
 
-export type ServiceKind = 'MapServer' | 'FeatureServer';
+export type ServiceKind = 'MapServer' | 'FeatureServer' | 'VectorTileServer';
 
 export interface ServiceUrl {
   /** Service root without the trailing layer id. */
@@ -31,6 +31,7 @@ export interface NormalizedLayerConfig {
   visible: boolean;
   mode: LayerMode;
   sublayers: number[] | undefined;
+  styleUrl: string | undefined;
   maxFeatures: number;
   maxPages: number;
 }
@@ -75,7 +76,7 @@ export function parseServiceUrl(
     );
   }
 
-  const match = /^(.*\/(mapserver|featureserver))(?:\/(\d+))?\/?$/i.exec(parsed.pathname);
+  const match = /^(.*\/(mapserver|featureserver|vectortileserver))(?:\/(\d+))?\/?$/i.exec(parsed.pathname);
   if (!match) {
     throw new NullIslandConfigError(
       `Layer url must point at a MapServer or FeatureServer: ${input}`,
@@ -83,7 +84,9 @@ export function parseServiceUrl(
   }
 
   const base = `${parsed.origin}${match[1]}`;
-  const kind = (match[2]!.toLowerCase() === 'mapserver' ? 'MapServer' : 'FeatureServer') as ServiceKind;
+  const name = match[2]!.toLowerCase();
+  const kind: ServiceKind =
+    name === 'mapserver' ? 'MapServer' : name === 'featureserver' ? 'FeatureServer' : 'VectorTileServer';
   const layerId = match[3] === undefined ? null : Number(match[3]);
 
   return {base, kind, layerId};
@@ -165,6 +168,7 @@ export function normalizeLayer(
     visible: config.visible !== false,
     mode,
     sublayers,
+    styleUrl: config.styleUrl,
     maxFeatures,
     maxPages,
   };

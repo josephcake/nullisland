@@ -13,7 +13,7 @@ export type RGBA = [number, number, number, number];
 export type Color = string | RGBA;
 
 /** Rendering strategy resolved for a layer. */
-export type ResolvedMode = 'export' | 'vector';
+export type ResolvedMode = 'export' | 'vector' | 'mvt';
 
 /** Lifecycle state of a layer. */
 export type LayerState = 'idle' | 'loading' | 'ready' | 'error';
@@ -53,6 +53,8 @@ export interface ArcGisLayerConfig {
   mode?: LayerMode;
   /** MapServer sublayer ids to include. Defaults to every visible sublayer. */
   sublayers?: number[];
+  /** Style document for a VectorTileServer. Defaults to its `resources/styles/root.json`. */
+  styleUrl?: string;
   /** Hard cap on features fetched per viewport. Defaults to 20 000. */
   maxFeatures?: number;
   /** Hard cap on pages fetched per viewport. Defaults to 10. */

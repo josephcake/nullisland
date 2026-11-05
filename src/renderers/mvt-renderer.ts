@@ -1,0 +1,383 @@
+/**
+ * VectorTileServer renderer.
+ *
+ * Decodes MVT tiles and paints them into one canvas anchored over the map.
+ * The canvas scales better than a `google.maps.Data` layer because it draws
+ * paths instead of tessellating one feature at a time.
+ */
+
+import {isAbortError} from '../errors.ts';
+import type {NormalizedLayerConfig} from '../config.ts';
+import type {HttpClient} from '../http.ts';
+import {decodeMvt, type MvtTile} from '../mvt/decode.ts';
+import type {MvtStyleLayer, VectorTileService} from '../mvt/service.ts';
+import {LRU} from '../util/lru.ts';
+import {clamp, lngLatToWorld, type BBox} from '../util/mercator.ts';
+import {tileX, tileY} from '../util/tiles.ts';
+import {padBBox, type Viewport} from '../viewport.ts';
+import type {LayerRenderer} from './types.ts';
+
+export interface MvtRendererOptions {
+  map: google.maps.Map;
+  google: typeof google;
+  http: HttpClient;
+  layer: NormalizedLayerConfig;
+  service: VectorTileService;
+  opacity: number;
+  padding: number;
+  onLoading(loading: boolean): void;
+  onError(error: Error): void;
+}
+
+interface TileRef {
+  z: number;
+  x: number;
+  y: number;
+}
+
+const PALETTE = ['#4c7dff', '#e8590c', '#f2b705', '#2f9e44', '#9c36b5', '#0c8599'];
+
+export class MvtRenderer implements LayerRenderer {
+  readonly mode = 'mvt' as const;
+
+  private readonly overlay: MvtCanvasOverlay;
+  private readonly cache: LRU<string, MvtTile>;
+  private controller: AbortController | null = null;
+  private generation = 0;
+  private attached = false;
+  private loading = false;
+  private opacity: number;
+  private renderedKey: string | null = null;
+  private lastView: Viewport | null = null;
+
+  constructor(private readonly options: MvtRendererOptions) {
+    this.opacity = options.opacity;
+    this.cache = new LRU(64);
+    this.overlay = new MvtCanvasOverlay(options.google, options.map);
+  }
+
+  attach(): void {
+    if (this.attached) return;
+    this.overlay.setMap(this.options.map);
+    this.attached = true;
+  }
+
+  detach(): void {
+    if (!this.attached) return;
+    this.overlay.setMap(null);
+    this.attached = false;
+  }
+
+  update(view: Viewport): void {
+    this.lastView = view;
+    void this.render(view);
+  }
+
+  prefetch(view: Viewport): void {
+    void this.render(view);
+  }
+
+  setOpacity(opacity: number): void {
+    this.opacity = opacity;
+    this.renderedKey = null;
+    if (this.lastView) void this.render(this.lastView);
+  }
+
+  refresh(): void {
+    this.cache.clear();
+    this.renderedKey = null;
+    if (this.lastView) void this.render(this.lastView);
+  }
+
+  destroy(): void {
+    this.generation += 1;
+    this.controller?.abort();
+    this.overlay.destroy();
+    this.cache.clear();
+    this.attached = false;
+    this.lastView = null;
+    this.renderedKey = null;
+  }
+
+  private setLoading(loading: boolean): void {
+    if (this.loading === loading) return;
+    this.loading = loading;
+    this.options.onLoading(loading);
+  }
+
+  private async render(view: Viewport): Promise<void> {
+    const {service, padding, layer} = this.options;
+    const bbox = padBBox(view.bounds4326, padding);
+    const z = clamp(Math.round(view.zoom) - 1, service.minZoom, service.maxZoom);
+    const key = `${z}|${view.zoom.toFixed(2)}|${bbox.map((value) => value.toFixed(4)).join(',')}`;
+    if (key === this.renderedKey) return;
+
+    const generation = ++this.generation;
+    this.controller?.abort();
+    const controller = new AbortController();
+    this.controller = controller;
+    this.setLoading(true);
+
+    try {
+      const tiles = tilesFor(bbox, z);
+      const decoded = await Promise.all(
+        tiles.map((tile) => this.loadTile(tile, controller.signal)),
+      );
+      if (generation !== this.generation) return;
+
+      this.draw(view, bbox, z, tiles, decoded);
+      this.overlay.setBounds(bbox);
+      this.renderedKey = key;
+    } catch (error) {
+      if (!isAbortError(error)) {
+        this.options.onError(error instanceof Error ? error : new Error(String(error)));
+      }
+    } finally {
+      if (generation === this.generation) this.setLoading(false);
+    }
+  }
+
+  private async loadTile(tile: TileRef, signal: AbortSignal): Promise<MvtTile | null> {
+    const key = `${tile.z}/${tile.x}/${tile.y}`;
+    const cached = this.cache.get(key);
+    if (cached) return cached;
+
+    const path = this.options.service.tileTemplate
+      .replace('{z}', String(tile.z))
+      .replace('{y}', String(tile.y))
+      .replace('{x}', String(tile.x));
+    const url = `${this.options.service.url}/${path}`;
+
+    const response = await this.options.http.request(url, {}, {signal});
+    const buffer = await response.arrayBuffer();
+    const decoded = decodeMvt(buffer);
+    this.cache.set(key, decoded);
+    return decoded;
+  }
+
+  private draw(
+    view: Viewport,
+    bbox: BBox,
+    z: number,
+    tiles: TileRef[],
+    decoded: Array<MvtTile | null>,
+  ): void {
+    const canvas = this.overlay.getCanvas();
+    if (!canvas) return;
+
+    const {padding, service, layer} = this.options;
+    const dpr = view.dpr;
+    const cssWidth = Math.max(1, Math.round(view.width * (1 + padding * 2)));
+    const cssHeight = Math.max(1, Math.round(view.height * (1 + padding * 2)));
+
+    canvas.width = Math.round(cssWidth * dpr);
+    canvas.height = Math.round(cssHeight * dpr);
+    canvas.style.width = `${cssWidth}px`;
+    canvas.style.height = `${cssHeight}px`;
+
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    context.clearRect(0, 0, cssWidth, cssHeight);
+    context.globalAlpha = this.opacity;
+    context.lineJoin = 'round';
+    context.lineCap = 'round';
+
+    const northWest = lngLatToWorld(bbox[0], bbox[3]);
+    const originX = northWest.x * 256 * 2 ** view.zoom;
+    const originY = northWest.y * 256 * 2 ** view.zoom;
+    const tilePx = 256 * 2 ** (view.zoom - z);
+
+    for (let index = 0; index < tiles.length; index += 1) {
+      const data = decoded[index];
+      if (!data) continue;
+      const tile = tiles[index]!;
+      const offsetX = tile.x * tilePx - originX;
+      const offsetY = tile.y * tilePx - originY;
+
+      if (service.styleLayers.length > 0) {
+        for (const style of service.styleLayers) {
+          if (!styleVisible(style, view.zoom)) continue;
+          for (const mvtLayer of data.layers) {
+            if (mvtLayer.name !== style.sourceLayer) continue;
+            const scale = tilePx / (mvtLayer.extent || service.extent);
+            this.drawFeatures(context, mvtLayer.features, style, offsetX, offsetY, scale);
+          }
+        }
+      } else {
+        data.layers.forEach((mvtLayer, layerIndex) => {
+          const style: MvtStyleLayer = {
+            id: mvtLayer.name,
+            sourceLayer: mvtLayer.name,
+            type: 'fill',
+            fillColor: PALETTE[layerIndex % PALETTE.length]!,
+            fillOpacity: 0.45,
+            lineColor: PALETTE[layerIndex % PALETTE.length]!,
+            lineWidth: 1,
+            lineOpacity: 0.9,
+            minZoom: undefined,
+            maxZoom: undefined,
+          };
+          const scale = tilePx / (mvtLayer.extent || service.extent);
+          this.drawFeatures(context, mvtLayer.features, style, offsetX, offsetY, scale);
+        });
+      }
+    }
+  }
+
+  private drawFeatures(
+    context: CanvasRenderingContext2D,
+    features: import('../mvt/decode.ts').MvtFeature[],
+    style: MvtStyleLayer,
+    offsetX: number,
+    offsetY: number,
+    scale: number,
+  ): void {
+    for (const feature of features) {
+      if (feature.type === 'polygon') {
+        context.beginPath();
+        for (const ring of feature.paths) {
+          tracePath(context, ring, offsetX, offsetY, scale, true);
+        }
+        context.globalAlpha = this.opacity * (style.fillOpacity ?? 0.55);
+        context.fillStyle = style.fillColor ?? 'rgba(76, 125, 255, 0.45)';
+        context.fill('evenodd');
+        if (style.lineColor) {
+          context.globalAlpha = this.opacity * (style.lineOpacity ?? style.fillOpacity ?? 0.8);
+          context.strokeStyle = style.lineColor;
+          context.lineWidth = style.lineWidth ?? 1;
+          context.stroke();
+        }
+      } else if (feature.type === 'line' && style.type === 'line') {
+        context.beginPath();
+        for (const path of feature.paths) tracePath(context, path, offsetX, offsetY, scale, false);
+        context.globalAlpha = this.opacity * (style.lineOpacity ?? 0.85);
+        context.strokeStyle = style.lineColor ?? style.fillColor ?? '#4c7dff';
+        context.lineWidth = style.lineWidth ?? 1.5;
+        context.stroke();
+      }
+    }
+  }
+}
+
+function tracePath(
+  context: CanvasRenderingContext2D,
+  points: Array<[number, number]>,
+  offsetX: number,
+  offsetY: number,
+  scale: number,
+  close: boolean,
+): void {
+  points.forEach(([x, y], index) => {
+    const px = offsetX + x * scale;
+    const py = offsetY + y * scale;
+    if (index === 0) context.moveTo(px, py);
+    else context.lineTo(px, py);
+  });
+  if (close) context.closePath();
+}
+
+function styleVisible(style: MvtStyleLayer, zoom: number): boolean {
+  if (style.minZoom !== undefined && zoom < style.minZoom) return false;
+  if (style.maxZoom !== undefined && zoom > style.maxZoom) return false;
+  return true;
+}
+
+function tilesFor(bbox: BBox, z: number): TileRef[] {
+  const max = 2 ** z - 1;
+  const x0 = clamp(Math.floor(tileX(bbox[0], z)), 0, max);
+  const x1 = clamp(Math.floor(tileX(bbox[2], z)), 0, max);
+  const y0 = clamp(Math.floor(tileY(bbox[3], z)), 0, max);
+  const y1 = clamp(Math.floor(tileY(bbox[1], z)), 0, max);
+
+  const tiles: TileRef[] = [];
+  for (let x = x0; x <= x1; x += 1) {
+    for (let y = y0; y <= y1; y += 1) tiles.push({z, x, y});
+  }
+  return tiles;
+}
+
+/** OverlayView that positions a canvas over a geographic bounding box. */
+class MvtCanvasOverlay {
+  private readonly overlay: google.maps.OverlayView;
+  private container: HTMLDivElement | null = null;
+  private canvas: HTMLCanvasElement | null = null;
+  private bounds: BBox | null = null;
+
+  constructor(googleApi: typeof google, map: google.maps.Map) {
+    const overlay = new googleApi.maps.OverlayView();
+    overlay.onAdd = () => this.onAdd();
+    overlay.draw = () => this.position();
+    overlay.onRemove = () => this.onRemove();
+    this.overlay = overlay;
+    this.overlay.setMap(map);
+  }
+
+  setMap(map: google.maps.Map | null): void {
+    this.overlay.setMap(map);
+  }
+
+  getCanvas(): HTMLCanvasElement | null {
+    return this.canvas;
+  }
+
+  setBounds(bounds: BBox): void {
+    this.bounds = bounds;
+    this.position();
+  }
+
+  destroy(): void {
+    this.overlay.setMap(null);
+    this.onRemove();
+  }
+
+  private onAdd(): void {
+    const panes = this.overlay.getPanes();
+    if (!panes) return;
+
+    const container = document.createElement('div');
+    container.style.position = 'absolute';
+    container.style.left = '0';
+    container.style.top = '0';
+    container.style.pointerEvents = 'none';
+
+    const canvas = document.createElement('canvas');
+    canvas.style.position = 'absolute';
+    canvas.style.left = '0';
+    canvas.style.top = '0';
+    canvas.style.pointerEvents = 'none';
+
+    container.appendChild(canvas);
+    panes.overlayLayer.appendChild(container);
+
+    this.container = container;
+    this.canvas = canvas;
+    this.position();
+  }
+
+  private onRemove(): void {
+    this.container?.remove();
+    this.container = null;
+    this.canvas = null;
+  }
+
+  private position(): void {
+    if (!this.container || !this.canvas || !this.bounds) return;
+    const projection = this.overlay.getProjection();
+    if (!projection) return;
+
+    const [west, south, east, north] = this.bounds;
+    const northWest = projection.fromLatLngToDivPixel({lat: north, lng: west});
+    const southEast = projection.fromLatLngToDivPixel({lat: south, lng: east});
+    if (!northWest || !southEast) return;
+
+    const width = Math.max(0, southEast.x - northWest.x);
+    const height = Math.max(0, southEast.y - northWest.y);
+    this.container.style.left = `${northWest.x}px`;
+    this.container.style.top = `${northWest.y}px`;
+    this.container.style.width = `${width}px`;
+    this.container.style.height = `${height}px`;
+    this.canvas.style.width = `${width}px`;
+    this.canvas.style.height = `${height}px`;
+  }
+}

@@ -42,11 +42,15 @@
         <li>
           <label><input type="checkbox" data-layer="minor" disabled checked /><span class="dot" style="--c: #3b82f6"></span>Minor</label>
         </li>
+        <li>
+          <label><input type="checkbox" data-layer="parcels" disabled checked /><span class="dot" style="--c: #2f9e44"></span>Parcels (MVT)</label>
+        </li>
       </ul>
 
       <footer>
         <a href="https://github.com/josephcake/nullisland" target="_blank" rel="noreferrer">Source</a>
         <a href="https://services9.arcgis.com/RHVPKKiFTONKtxq3/arcgis/rest/services/NWS_Watches_Warnings_v1/FeatureServer" target="_blank" rel="noreferrer">NWS data</a>
+        <button id="goto-parcels" class="ghost" type="button" hidden>Parcels</button>
         <button id="forget" class="ghost" type="button" hidden>Forget key</button>
       </footer>
     </section>

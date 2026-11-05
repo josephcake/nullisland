@@ -18,6 +18,15 @@ const LAYERS = [
   {id: 'severe', title: 'Severe', color: '#e8590c', url: `${SERVICE}/9`},
   {id: 'moderate', title: 'Moderate', color: '#f2b705', url: `${SERVICE}/10`},
   {id: 'minor', title: 'Minor', color: '#3b82f6', url: `${SERVICE}/11`},
+  {
+    id: 'parcels',
+    title: 'Parcels (MVT)',
+    color: '#2f9e44',
+    url: 'https://vectortileservices3.arcgis.com/GVgbJbqm8hXASVYi/arcgis/rest/services/Santa_Monica_Mountains_Parcels_VTL/VectorTileServer',
+    opacity: 0.8,
+    minZoom: 12,
+    maxZoom: 17,
+  },
 ];
 
 const $ = (id) => document.getElementById(id);
@@ -28,10 +37,12 @@ const rememberInput = $('remember');
 const statusEl = $('status');
 const layersEl = $('layers');
 const forgetButton = $('forget');
+const parcelsButton = $('goto-parcels');
 const debugEl = $('debug');
 const mapEl = $('map');
 
 let engine = null;
+let mapInstance = null;
 let arcgisRequests = 0;
 const logLines = [];
 
@@ -140,6 +151,7 @@ function loadGoogleMaps(key) {
 function enableLayerToggles() {
   layersEl.hidden = false;
   forgetButton.hidden = false;
+  parcelsButton.hidden = false;
 
   for (const checkbox of layersEl.querySelectorAll('input[data-layer]')) {
     checkbox.disabled = false;
@@ -169,6 +181,8 @@ async function start(key) {
       clickableIcons: false,
     });
 
+    mapInstance = map;
+
     engine = new NullIsland({
       map,
       layers: LAYERS.map((layer) => ({
@@ -176,8 +190,9 @@ async function start(key) {
         title: layer.title,
         url: layer.url,
         color: layer.color,
-        opacity: 0.65,
-        maxZoom: 12,
+        opacity: layer.opacity ?? 0.65,
+        minZoom: layer.minZoom,
+        maxZoom: layer.maxZoom ?? 12,
       })),
       indicator: true,
     });
@@ -218,6 +233,12 @@ form.addEventListener('submit', (event) => {
   saveKey(key);
   // Reload so a previously failed Google script is discarded.
   location.reload();
+});
+
+parcelsButton.addEventListener('click', () => {
+  if (!mapInstance) return;
+  mapInstance.setCenter({lat: 34.08, lng: -118.62});
+  mapInstance.setZoom(14);
 });
 
 forgetButton.addEventListener('click', () => {
