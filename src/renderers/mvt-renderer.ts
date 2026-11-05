@@ -157,7 +157,8 @@ export class MvtRenderer implements LayerRenderer {
       );
       if (generation !== this.generation) return;
 
-      this.draw(view, bbox, z, tiles, decoded);
+      await this.draw(view, bbox, z, tiles, decoded, generation);
+      if (generation !== this.generation) return;
       this.overlay.setBounds(bbox);
       this.renderedKey = key;
       this.lastBbox = bbox;
@@ -203,35 +204,50 @@ export class MvtRenderer implements LayerRenderer {
     }
   }
 
-  private draw(
+  private async draw(
     view: Viewport,
     bbox: BBox,
     z: number,
     tiles: TileRef[],
     decoded: Array<MvtTile | null>,
-  ): void {
+    generation: number,
+  ): Promise<void> {
     const canvas = this.overlay.getCanvas();
     if (!canvas) return;
 
     const {padding} = this.options;
-    const dpr = view.dpr;
+    const dpr = Math.min(view.dpr, 2);
     const cssWidth = Math.max(1, Math.round(view.width * (1 + padding * 2)));
     const cssHeight = Math.max(1, Math.round(view.height * (1 + padding * 2)));
 
-    canvas.width = Math.round(cssWidth * dpr);
-    canvas.height = Math.round(cssHeight * dpr);
+    // Cap total device pixels: a 5k x 3k backing store costs more to clear and
+    // composite than it adds in sharpness.
+    const maxPixels = 6_000_000;
+    const pixelScale = Math.min(1, Math.sqrt(maxPixels / (cssWidth * dpr * cssHeight * dpr)));
+    const deviceWidth = Math.max(1, Math.round(cssWidth * dpr * pixelScale));
+    const deviceHeight = Math.max(1, Math.round(cssHeight * dpr * pixelScale));
+
+    // Resizing a canvas reallocates its backing store; only do it on change.
+    if (canvas.width !== deviceWidth || canvas.height !== deviceHeight) {
+      canvas.width = deviceWidth;
+      canvas.height = deviceHeight;
+    }
     canvas.style.width = `${cssWidth}px`;
     canvas.style.height = `${cssHeight}px`;
 
     const context = canvas.getContext('2d');
     if (!context) return;
-    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const scaleX = deviceWidth / cssWidth;
+    const scaleY = deviceHeight / cssHeight;
+    context.setTransform(scaleX, 0, 0, scaleY, 0, 0);
     context.clearRect(0, 0, cssWidth, cssHeight);
 
     const northWest = lngLatToWorld(bbox[0], bbox[3]);
     const originX = northWest.x * 256 * 2 ** view.zoom;
     const originY = northWest.y * 256 * 2 ** view.zoom;
     const tilePx = 256 * 2 ** (view.zoom - z);
+
+    const started = typeof performance !== 'undefined' ? performance.now() : 0;
 
     // Tiles are rasterised once and cached: compositing images is cheap,
     // re-tessellating tens of thousands of polygons is not.
@@ -243,6 +259,7 @@ export class MvtRenderer implements LayerRenderer {
       const key = `${z}/${tile.x}/${tile.y}`;
 
       let tileCanvas = this.tileCache.get(key);
+      const cached = tileCanvas !== undefined;
       if (!tileCanvas) {
         tileCanvas = this.renderTile(data, view.zoom);
         this.tileCache.set(key, tileCanvas);
@@ -255,6 +272,21 @@ export class MvtRenderer implements LayerRenderer {
         tilePx,
         tilePx,
       );
+
+      // Rasterising one dense tile can take ~100ms. Yield between newly
+      // rendered tiles so the map and UI stay responsive.
+      if (!cached && generation === this.generation) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    }
+
+    if (typeof performance !== 'undefined' && typeof console !== 'undefined') {
+      const elapsed = performance.now() - started;
+      if (elapsed > 50) {
+        console.debug(
+          `[nullisland mvt] compose ${Math.round(elapsed)}ms — ${tiles.length} tiles — ${deviceWidth}x${deviceHeight}`,
+        );
+      }
     }
   }
 

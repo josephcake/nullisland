@@ -2458,7 +2458,8 @@ var MvtRenderer = class {
         tiles.map((tile) => this.loadTile(tile, controller.signal))
       );
       if (generation !== this.generation) return;
-      this.draw(view, bbox, z, tiles, decoded);
+      await this.draw(view, bbox, z, tiles, decoded, generation);
+      if (generation !== this.generation) return;
       this.overlay.setBounds(bbox);
       this.renderedKey = key;
       this.lastBbox = bbox;
@@ -2492,25 +2493,34 @@ var MvtRenderer = class {
       throw error;
     }
   }
-  draw(view, bbox, z, tiles, decoded) {
+  async draw(view, bbox, z, tiles, decoded, generation) {
     const canvas = this.overlay.getCanvas();
     if (!canvas) return;
     const { padding } = this.options;
-    const dpr = view.dpr;
+    const dpr = Math.min(view.dpr, 2);
     const cssWidth = Math.max(1, Math.round(view.width * (1 + padding * 2)));
     const cssHeight = Math.max(1, Math.round(view.height * (1 + padding * 2)));
-    canvas.width = Math.round(cssWidth * dpr);
-    canvas.height = Math.round(cssHeight * dpr);
+    const maxPixels = 6e6;
+    const pixelScale = Math.min(1, Math.sqrt(maxPixels / (cssWidth * dpr * cssHeight * dpr)));
+    const deviceWidth = Math.max(1, Math.round(cssWidth * dpr * pixelScale));
+    const deviceHeight = Math.max(1, Math.round(cssHeight * dpr * pixelScale));
+    if (canvas.width !== deviceWidth || canvas.height !== deviceHeight) {
+      canvas.width = deviceWidth;
+      canvas.height = deviceHeight;
+    }
     canvas.style.width = `${cssWidth}px`;
     canvas.style.height = `${cssHeight}px`;
     const context = canvas.getContext("2d");
     if (!context) return;
-    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const scaleX = deviceWidth / cssWidth;
+    const scaleY = deviceHeight / cssHeight;
+    context.setTransform(scaleX, 0, 0, scaleY, 0, 0);
     context.clearRect(0, 0, cssWidth, cssHeight);
     const northWest = lngLatToWorld(bbox[0], bbox[3]);
     const originX = northWest.x * 256 * 2 ** view.zoom;
     const originY = northWest.y * 256 * 2 ** view.zoom;
     const tilePx = 256 * 2 ** (view.zoom - z);
+    const started = typeof performance !== "undefined" ? performance.now() : 0;
     context.globalAlpha = this.opacity;
     for (let index = 0; index < tiles.length; index += 1) {
       const data = decoded[index];
@@ -2518,6 +2528,7 @@ var MvtRenderer = class {
       const tile = tiles[index];
       const key = `${z}/${tile.x}/${tile.y}`;
       let tileCanvas = this.tileCache.get(key);
+      const cached = tileCanvas !== void 0;
       if (!tileCanvas) {
         tileCanvas = this.renderTile(data, view.zoom);
         this.tileCache.set(key, tileCanvas);
@@ -2529,6 +2540,17 @@ var MvtRenderer = class {
         tilePx,
         tilePx
       );
+      if (!cached && generation === this.generation) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    }
+    if (typeof performance !== "undefined" && typeof console !== "undefined") {
+      const elapsed = performance.now() - started;
+      if (elapsed > 50) {
+        console.debug(
+          `[nullisland mvt] compose ${Math.round(elapsed)}ms \u2014 ${tiles.length} tiles \u2014 ${deviceWidth}x${deviceHeight}`
+        );
+      }
     }
   }
   /** Paint one tile at its native 512 px into an offscreen canvas. */
