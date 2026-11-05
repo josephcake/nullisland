@@ -239,11 +239,11 @@ export class MvtRenderer implements LayerRenderer {
         for (const ring of feature.paths) {
           tracePath(context, ring, offsetX, offsetY, scale, true);
         }
-        context.globalAlpha = this.opacity * (style.fillOpacity ?? 0.55);
+        context.globalAlpha = this.opacity * (style.fillOpacity ?? 1);
         context.fillStyle = style.fillColor ?? 'rgba(76, 125, 255, 0.45)';
         context.fill('evenodd');
         if (style.lineColor) {
-          context.globalAlpha = this.opacity * (style.lineOpacity ?? style.fillOpacity ?? 0.8);
+          context.globalAlpha = this.opacity * (style.lineOpacity ?? 1);
           context.strokeStyle = style.lineColor;
           context.lineWidth = style.lineWidth ?? 1;
           context.stroke();
