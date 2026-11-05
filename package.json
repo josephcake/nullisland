@@ -1,7 +1,7 @@
 {
   "name": "@offthemap/nullisland",
   "version": "0.2.1",
-  "description": "ArcGIS layers on Google Maps — PBF vector features, CORS-free image exports, tile-snapped caching. No token needed for public layers.",
+  "description": "ArcGIS layers on Google Maps \u2014 PBF vector features, CORS-free image exports, tile-snapped caching. No token needed for public layers.",
   "keywords": [
     "arcgis",
     "esri",
@@ -38,6 +38,11 @@
       "types": "./dist/pbf/index.d.ts",
       "import": "./dist/pbf/index.js",
       "require": "./dist/pbf/index.cjs"
+    },
+    "./mvt": {
+      "types": "./dist/mvt/index.d.ts",
+      "import": "./dist/mvt/index.js",
+      "require": "./dist/mvt/index.cjs"
     }
   },
   "files": [
