@@ -156,7 +156,12 @@ function enableLayerToggles() {
   for (const checkbox of layersEl.querySelectorAll('input[data-layer]')) {
     checkbox.disabled = false;
     checkbox.addEventListener('change', () => {
-      engine?.getLayer(checkbox.dataset.layer)?.setVisible(checkbox.checked);
+      try {
+        engine?.getLayer(checkbox.dataset.layer)?.setVisible(checkbox.checked);
+      } catch (error) {
+        log(`toggle failed: ${error.message}`);
+        setStatus(error.message, 'error');
+      }
     });
   }
 }

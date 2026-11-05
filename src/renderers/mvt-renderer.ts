@@ -60,14 +60,22 @@ export class MvtRenderer implements LayerRenderer {
 
   attach(): void {
     if (this.attached) return;
-    this.overlay.setMap(this.options.map);
     this.attached = true;
+    this.lastBbox = null;
+    this.renderedKey = null;
+    this.overlay.setMap(this.options.map);
   }
 
   detach(): void {
     if (!this.attached) return;
-    this.overlay.setMap(null);
     this.attached = false;
+    this.generation += 1;
+    this.controller?.abort();
+    this.controller = null;
+    this.lastBbox = null;
+    this.lastZoom = Number.NaN;
+    this.renderedKey = null;
+    this.overlay.setMap(null);
   }
 
   update(view: Viewport): void {
