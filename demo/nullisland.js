@@ -3444,7 +3444,7 @@ var MvtWebGLRenderer = class {
     __publicField(this, "lastView", null);
     this.opacity = options.opacity;
     this.decoded = new LRU(64);
-    this.meshes = new LRU(48);
+    this.meshes = new LRU(128);
     this.overlay = new GlCanvasOverlay(options.google, options.map);
   }
   attach() {
@@ -3516,7 +3516,7 @@ var MvtWebGLRenderer = class {
       for (const tile of decoded) {
         for (const layer of tile?.layers ?? []) total += layer.features.length;
       }
-      if (total > this.options.layer.maxFeatures) {
+      if (total > Math.max(this.options.layer.maxFeatures, 2e5)) {
         this.clearCanvas(plan, view);
         return;
       }

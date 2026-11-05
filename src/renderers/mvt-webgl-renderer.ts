@@ -94,7 +94,7 @@ export class MvtWebGLRenderer implements LayerRenderer {
   constructor(private readonly options: MvtRendererOptions) {
     this.opacity = options.opacity;
     this.decoded = new LRU(64);
-    this.meshes = new LRU(48);
+    this.meshes = new LRU(128);
     this.overlay = new GlCanvasOverlay(options.google, options.map);
   }
 
@@ -179,7 +179,10 @@ export class MvtWebGLRenderer implements LayerRenderer {
       for (const tile of decoded) {
         for (const layer of tile?.layers ?? []) total += layer.features.length;
       }
-      if (total > this.options.layer.maxFeatures) {
+      // The canvas painter's feature budget exists because CPU rasterisation
+      // is linear in feature count. A GPU draw is not, so only reject truly
+      // pathological viewports.
+      if (total > Math.max(this.options.layer.maxFeatures, 200_000)) {
         this.clearCanvas(plan, view);
         return;
       }
