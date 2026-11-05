@@ -442,12 +442,15 @@ async function discoverService(service, http, options = {}) {
   const capabilities = splitCapabilities(metadata.capabilities ?? "");
   const queryFormats = splitFormats(metadata.supportedQueryFormats);
   if (service.layerId !== null) {
-    const layer = { ...metadata, id: service.layerId };
+    const layerMetadata = await readLayerMetadata(http, service, metadata);
+    const layer = { ...layerMetadata, id: service.layerId };
+    const layerFormats = splitFormats(layerMetadata.supportedQueryFormats);
+    const formats = layerFormats.length > 0 ? layerFormats : queryFormats;
     const sublayer = toSublayer(layer, {
       kind: service.kind,
       version,
-      maxRecordCount: Number(metadata.maxRecordCount ?? 1e3),
-      queryFormats
+      maxRecordCount: Number(layerMetadata.maxRecordCount ?? metadata.maxRecordCount ?? 1e3),
+      queryFormats: formats
     });
     const layerCapabilities = splitCapabilities(layer.capabilities ?? metadata.capabilities ?? "");
     return {
@@ -457,7 +460,7 @@ async function discoverService(service, http, options = {}) {
       title: options.title ?? layer.name ?? service.base,
       description: metadata.description ?? metadata.serviceDescription,
       capabilities: layerCapabilities,
-      queryFormats,
+      queryFormats: formats,
       supportsExport: service.kind === "MapServer" && hasCapability(layerCapabilities, "map"),
       maxRecordCount: sublayer.maxRecordCount,
       singleLayer: true,
@@ -505,6 +508,13 @@ async function discoverService(service, http, options = {}) {
     sublayers,
     zoom
   };
+}
+async function readLayerMetadata(http, service, fallback) {
+  try {
+    return await http.json(`${service.base}/${service.layerId}`, { f: "json" });
+  } catch {
+    return fallback;
+  }
 }
 function toSublayer(layer, context) {
   const minScale = Number(layer.minScale ?? 0);

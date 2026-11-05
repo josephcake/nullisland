@@ -54,6 +54,34 @@ describe('discoverService capabilities', () => {
     expect(service.sublayers[0]!.supportsGeoJson).toBe(false);
   });
 
+  it('reads the layer document for a single-layer url', async () => {
+    const http = {
+      json: async (url: string) =>
+        url.endsWith('/9')
+          ? {
+              id: 9,
+              name: 'Severe',
+              geometryType: 'esriGeometryPolygon',
+              objectIdField: 'OBJECTID',
+              maxRecordCount: 2000,
+              supportedQueryFormats: 'JSON,geoJSON,PBF',
+              advancedQueryCapabilities: {supportsPagination: true},
+            }
+          : {
+              currentVersion: 12,
+              capabilities: 'Query',
+              supportedQueryFormats: 'JSON',
+              layers: [{id: 9, name: 'Severe'}],
+            },
+    } as unknown as HttpClient;
+
+    const service = await discoverService(parseServiceUrl(`${serviceUrl}/9`), http);
+    expect(service.singleLayer).toBe(true);
+    expect(service.sublayers[0]!.geometryType).toBe('esriGeometryPolygon');
+    expect(service.sublayers[0]!.objectIdField).toBe('OBJECTID');
+    expect(service.sublayers[0]!.supportsPbf).toBe(true);
+  });
+
   it('respects servers that disable pagination', async () => {
     const http = fakeHttp(
       {

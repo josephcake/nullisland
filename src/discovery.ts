@@ -89,6 +89,7 @@ interface LayerMetadata {
     supportsStatistics?: boolean;
     supportsReturningQueryExtent?: boolean;
   };
+  supportedQueryFormats?: string;
 }
 
 interface ServiceMetadata extends LayerMetadata {
@@ -117,12 +118,17 @@ export async function discoverService(
   const queryFormats = splitFormats(metadata.supportedQueryFormats);
 
   if (service.layerId !== null) {
-    const layer = {...metadata, id: service.layerId} as LayerMetadata;
+    // A layer URL still needs the layer document: geometryType, objectIdField,
+    // renderer and pagination flags live there, not on the service root.
+    const layerMetadata = await readLayerMetadata(http, service, metadata);
+    const layer = {...layerMetadata, id: service.layerId} as LayerMetadata;
+    const layerFormats = splitFormats(layerMetadata.supportedQueryFormats);
+    const formats = layerFormats.length > 0 ? layerFormats : queryFormats;
     const sublayer = toSublayer(layer, {
       kind: service.kind,
       version,
-      maxRecordCount: Number(metadata.maxRecordCount ?? 1000),
-      queryFormats,
+      maxRecordCount: Number(layerMetadata.maxRecordCount ?? metadata.maxRecordCount ?? 1000),
+      queryFormats: formats,
     });
     const layerCapabilities = splitCapabilities(layer.capabilities ?? metadata.capabilities ?? '');
     return {
@@ -132,7 +138,7 @@ export async function discoverService(
       title: options.title ?? layer.name ?? service.base,
       description: metadata.description ?? metadata.serviceDescription,
       capabilities: layerCapabilities,
-      queryFormats,
+      queryFormats: formats,
       supportsExport: service.kind === 'MapServer' && hasCapability(layerCapabilities, 'map'),
       maxRecordCount: sublayer.maxRecordCount,
       singleLayer: true,
@@ -195,6 +201,19 @@ export async function discoverService(
     sublayers,
     zoom,
   };
+}
+
+async function readLayerMetadata(
+  http: HttpClient,
+  service: ServiceUrl,
+  fallback: ServiceMetadata,
+): Promise<ServiceMetadata> {
+  try {
+    return await http.json<ServiceMetadata>(`${service.base}/${service.layerId}`, {f: 'json'});
+  } catch {
+    // Older or locked-down servers may refuse the layer document.
+    return fallback;
+  }
 }
 
 function toSublayer(
