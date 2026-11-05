@@ -14,7 +14,7 @@ import type {MvtStyleLayer, VectorTileService} from '../mvt/service.ts';
 import {LRU} from '../util/lru.ts';
 import {clamp, lngLatToWorld, type BBox} from '../util/mercator.ts';
 import {tileToBBox, tileX, tileY} from '../util/tiles.ts';
-import {padBBox, type Viewport} from '../viewport.ts';
+import {bboxContains, padBBox, type Viewport} from '../viewport.ts';
 import type {LayerRenderer} from './types.ts';
 
 export interface MvtRendererOptions {
@@ -49,6 +49,8 @@ export class MvtRenderer implements LayerRenderer {
   private opacity: number;
   private renderedKey: string | null = null;
   private lastView: Viewport | null = null;
+  private lastBbox: BBox | null = null;
+  private lastZoom = Number.NaN;
 
   constructor(private readonly options: MvtRendererOptions) {
     this.opacity = options.opacity;
@@ -80,12 +82,14 @@ export class MvtRenderer implements LayerRenderer {
   setOpacity(opacity: number): void {
     this.opacity = opacity;
     this.renderedKey = null;
+    this.lastBbox = null;
     if (this.lastView) void this.render(this.lastView);
   }
 
   refresh(): void {
     this.cache.clear();
     this.renderedKey = null;
+    this.lastBbox = null;
     if (this.lastView) void this.render(this.lastView);
   }
 
@@ -96,6 +100,8 @@ export class MvtRenderer implements LayerRenderer {
     this.cache.clear();
     this.attached = false;
     this.lastView = null;
+    this.lastBbox = null;
+    this.lastZoom = Number.NaN;
     this.renderedKey = null;
   }
 
@@ -106,8 +112,18 @@ export class MvtRenderer implements LayerRenderer {
   }
 
   private async render(view: Viewport): Promise<void> {
-    const {service, padding, layer} = this.options;
+    const {service, padding} = this.options;
     const bbox = padBBox(view.bounds4326, padding);
+
+    // The canvas is anchored to its bbox, so panning inside the padding needs
+    // no redraw at all.
+    if (
+      this.lastBbox &&
+      view.zoom === this.lastZoom &&
+      bboxContains(this.lastBbox, view.bounds4326)
+    ) {
+      return;
+    }
     const z = clamp(Math.round(view.zoom) - 1, service.minZoom, service.maxZoom);
     const key = `${z}|${view.zoom.toFixed(2)}|${bbox.map((value) => value.toFixed(4)).join(',')}`;
     if (key === this.renderedKey) return;
@@ -131,6 +147,8 @@ export class MvtRenderer implements LayerRenderer {
       this.draw(view, bbox, z, tiles, decoded);
       this.overlay.setBounds(bbox);
       this.renderedKey = key;
+      this.lastBbox = bbox;
+      this.lastZoom = view.zoom;
     } catch (error) {
       if (!isAbortError(error)) {
         this.options.onError(error instanceof Error ? error : new Error(String(error)));
@@ -182,7 +200,7 @@ export class MvtRenderer implements LayerRenderer {
     const canvas = this.overlay.getCanvas();
     if (!canvas) return;
 
-    const {padding, service, layer} = this.options;
+    const {padding, service} = this.options;
     const dpr = view.dpr;
     const cssWidth = Math.max(1, Math.round(view.width * (1 + padding * 2)));
     const cssHeight = Math.max(1, Math.round(view.height * (1 + padding * 2)));
@@ -205,75 +223,72 @@ export class MvtRenderer implements LayerRenderer {
     const originY = northWest.y * 256 * 2 ** view.zoom;
     const tilePx = 256 * 2 ** (view.zoom - z);
 
-    for (let index = 0; index < tiles.length; index += 1) {
-      const data = decoded[index];
-      if (!data) continue;
-      const tile = tiles[index]!;
-      const offsetX = tile.x * tilePx - originX;
-      const offsetY = tile.y * tilePx - originY;
+    const styles =
+      service.styleLayers.length > 0 ? service.styleLayers : this.fallbackStyles(decoded);
 
-      if (service.styleLayers.length > 0) {
-        for (const style of service.styleLayers) {
-          if (!styleVisible(style, view.zoom)) continue;
-          for (const mvtLayer of data.layers) {
-            if (mvtLayer.name !== style.sourceLayer) continue;
-            const scale = tilePx / (mvtLayer.extent || service.extent);
-            this.drawFeatures(context, mvtLayer.features, style, offsetX, offsetY, scale);
+    // One path per style layer: state changes, not geometry, dominate cost.
+    for (const style of styles) {
+      if (!styleVisible(style, view.zoom)) continue;
+
+      context.beginPath();
+      let hasGeometry = false;
+
+      for (let index = 0; index < tiles.length; index += 1) {
+        const data = decoded[index];
+        if (!data) continue;
+        const tile = tiles[index]!;
+        const offsetX = tile.x * tilePx - originX;
+        const offsetY = tile.y * tilePx - originY;
+
+        for (const mvtLayer of data.layers) {
+          if (mvtLayer.name !== style.sourceLayer) continue;
+          const scale = tilePx / (mvtLayer.extent || service.extent);
+          for (const feature of mvtLayer.features) {
+            const relevant =
+              style.type === 'fill' ? feature.type === 'polygon' : feature.type === 'line';
+            if (!relevant) continue;
+            for (const path of feature.paths) {
+              tracePath(context, path, offsetX, offsetY, scale, style.type === 'fill');
+            }
+            hasGeometry = true;
           }
         }
-      } else {
-        data.layers.forEach((mvtLayer, layerIndex) => {
-          const style: MvtStyleLayer = {
-            id: mvtLayer.name,
-            sourceLayer: mvtLayer.name,
-            type: 'fill',
-            fillColor: PALETTE[layerIndex % PALETTE.length]!,
-            fillOpacity: 0.45,
-            lineColor: PALETTE[layerIndex % PALETTE.length]!,
-            lineWidth: 1,
-            lineOpacity: 0.9,
-            minZoom: undefined,
-            maxZoom: undefined,
-          };
-          const scale = tilePx / (mvtLayer.extent || service.extent);
-          this.drawFeatures(context, mvtLayer.features, style, offsetX, offsetY, scale);
-        });
+      }
+
+      if (!hasGeometry) continue;
+
+      if (style.type === 'fill') {
+        context.globalAlpha = this.opacity * (style.fillOpacity ?? 1);
+        context.fillStyle = style.fillColor ?? 'rgba(76, 125, 255, 0.45)';
+        context.fill('nonzero');
+      }
+
+      if (style.lineColor) {
+        context.globalAlpha = this.opacity * (style.lineOpacity ?? 1);
+        context.strokeStyle = style.lineColor;
+        context.lineWidth = style.lineWidth ?? (style.type === 'fill' ? 1 : 1.5);
+        context.stroke();
       }
     }
   }
 
-  private drawFeatures(
-    context: CanvasRenderingContext2D,
-    features: import('../mvt/decode.ts').MvtFeature[],
-    style: MvtStyleLayer,
-    offsetX: number,
-    offsetY: number,
-    scale: number,
-  ): void {
-    for (const feature of features) {
-      if (feature.type === 'polygon') {
-        context.beginPath();
-        for (const ring of feature.paths) {
-          tracePath(context, ring, offsetX, offsetY, scale, true);
-        }
-        context.globalAlpha = this.opacity * (style.fillOpacity ?? 1);
-        context.fillStyle = style.fillColor ?? 'rgba(76, 125, 255, 0.45)';
-        context.fill('evenodd');
-        if (style.lineColor) {
-          context.globalAlpha = this.opacity * (style.lineOpacity ?? 1);
-          context.strokeStyle = style.lineColor;
-          context.lineWidth = style.lineWidth ?? 1;
-          context.stroke();
-        }
-      } else if (feature.type === 'line' && style.type === 'line') {
-        context.beginPath();
-        for (const path of feature.paths) tracePath(context, path, offsetX, offsetY, scale, false);
-        context.globalAlpha = this.opacity * (style.lineOpacity ?? 0.85);
-        context.strokeStyle = style.lineColor ?? style.fillColor ?? '#4c7dff';
-        context.lineWidth = style.lineWidth ?? 1.5;
-        context.stroke();
-      }
+  private fallbackStyles(decoded: Array<MvtTile | null>): MvtStyleLayer[] {
+    const names = new Set<string>();
+    for (const tile of decoded) {
+      for (const layer of tile?.layers ?? []) names.add(layer.name);
     }
+    return [...names].map((name, index) => ({
+      id: name,
+      sourceLayer: name,
+      type: 'fill' as const,
+      fillColor: PALETTE[index % PALETTE.length]!,
+      fillOpacity: 0.45,
+      lineColor: PALETTE[index % PALETTE.length]!,
+      lineWidth: 1,
+      lineOpacity: 0.9,
+      minZoom: undefined,
+      maxZoom: undefined,
+    }));
   }
 }
 
