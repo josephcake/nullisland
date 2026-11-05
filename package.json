@@ -62,7 +62,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build",
-    "build:demo": "esbuild src/index.ts --bundle --format=esm --platform=browser --target=es2020 --legal-comments=none --outfile=demo/nullisland.js"
+    "build:demo": "esbuild src/index.ts --bundle --format=esm --platform=browser --target=es2020 --legal-comments=none --outfile=demo/nullisland.js",
+    "build:standalone": "npm run build:demo && node scripts/build-standalone.mjs"
   },
   "dependencies": {
     "@types/google.maps": "^3.58.1"
